@@ -5,7 +5,7 @@
 git clone https://github.com/wym-areuok/MesToolsUI.git
 
 # 进入项目目录
-cd RuoYi-Vue3
+cd MesToolsUI
 
 # 安装依赖
 yarn --registry=https://registry.npmmirror.com
