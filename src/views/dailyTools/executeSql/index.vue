@@ -129,6 +129,18 @@ const {
   rules
 } = toRefs(data)
 
+/**
+ * SQL 前端预校验逻辑：
+ * 1. 基础处理：去除 BOM 字符 (\uFEFF) 和首尾空格，确保解析准确。
+ * 2. 分词解析：利用正则提取有效 Token，跳过注释、字符串和方括号内容，防止通过注释或字符串内容绕过校验。
+ * 3. 安全拦截：
+ *     检测分号，禁止多语句批量执行。
+ *     校验首个关键字与操作按钮类型的一致性。
+ *     拦截危险关键字 (DROP, TRUNCATE 等) 及混合操作 (如 SELECT 中夹带 DELETE)。
+ * 4. 业务规则：
+ *     SELECT: 递归检查所有 SELECT 关键字后是否紧跟 TOP N，并限制最大行数为 1000。
+ *     UPDATE/DELETE: 强制检查 WHERE 子句存在性，拦截恒真条件 (1=1, 'a'='a')，确保包含精确匹配条件 (=/IN)。
+ */
 /** SQL语法检查 */
 function validateSqlServerSql(sql, operationType) {
   const trimmedSql = sql.replace(/\uFEFF/g, '').trim();
@@ -137,16 +149,25 @@ function validateSqlServerSql(sql, operationType) {
   }
   const upperSql = trimmedSql.toUpperCase();
   // 3. 安全校验：通过分词检查关键字数量,防止多语句执行(如 UPDATE...DELETE)及危险操作
-  // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.关键字
-  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
+  // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.分号 6.关键字
+  // 注意: JS正则字面量中单词边界是 \b, 不要写成 \\b
+  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(;)|(?:\b)(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
   const tokens = [...trimmedSql.matchAll(tokenRegex)];
   const kwCounts = { SELECT: 0, UPDATE: 0, INSERT: 0, DELETE: 0, DANGEROUS: 0 };
   let firstKeyword = null;
+  let hasSemicolon = false;
   for (const match of tokens) {
     if (match[1] || match[2] || match[3] || match[4]) continue; // 跳过注释、字符串和方括号标识符
-    const kw = match[5].toUpperCase();
+    if (match[5]) { // Group 5 是分号
+      hasSemicolon = true;
+      continue;
+    }
+    const kw = match[6].toUpperCase(); // Group 6 是关键字
     if (!firstKeyword) firstKeyword = kw; // 记录找到的第一个有效关键字
-
+    // 如果之前已经出现了分号,且现在又出现了新的关键字,说明是多条语句
+    if (hasSemicolon) {
+      return { valid: false, message: '检测到多条SQL语句（通过分号分隔）,请一次只执行一条语句' };
+    }
     if (['DROP', 'TRUNCATE', 'ALTER', 'CREATE', 'RENAME'].includes(kw)) {
       kwCounts.DANGEROUS++;
     } else {
@@ -167,6 +188,7 @@ function validateSqlServerSql(sql, operationType) {
       return { valid: false, message: '查询语句不允许包含 UPDATE/INSERT/DELETE 操作' };
     }
   }
+
   // 4. 特定操作类型的校验
   switch (operationType) {
     case 'UPDATE':
