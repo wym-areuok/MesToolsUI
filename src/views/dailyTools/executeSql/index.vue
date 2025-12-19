@@ -147,11 +147,9 @@ function validateSqlServerSql(sql, operationType) {
   if (!trimmedSql) {
     return { valid: false, message: 'SQL语句不能为空' };
   }
-  const upperSql = trimmedSql.toUpperCase();
   // 3. 安全校验：通过分词检查关键字数量,防止多语句执行(如 UPDATE...DELETE)及危险操作
   // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.分号 6.关键字
-  // 注意: JS正则字面量中单词边界是 \b, 不要写成 \\b
-  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(;)|(?:\b)(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
+  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(;)|\b(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
   const tokens = [...trimmedSql.matchAll(tokenRegex)];
   const kwCounts = { SELECT: 0, UPDATE: 0, INSERT: 0, DELETE: 0, DANGEROUS: 0 };
   let firstKeyword = null;
@@ -272,16 +270,16 @@ function validateSqlServerSql(sql, operationType) {
 
 /** 移除WHERE子句后的干扰项 */
 function removeSubsequentClauses(whereClause) {
-  let clause = whereClause;
-  const nextClauses = [' ORDER BY ', ' GROUP BY ', ' HAVING '];
-  for (const next of nextClauses) {
-    const clauseIndex = clause.toUpperCase().indexOf(next);
-    if (clauseIndex > 0) {
-      clause = clause.substring(0, clauseIndex);
-      break;
+  // 使用正则查找关键字，确保不匹配字符串或注释中的内容
+  // Group 5 是我们要查找的截断关键字
+  const regex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|\b(ORDER\s+BY|GROUP\s+BY|HAVING)\b/gi;
+  let match;
+  while ((match = regex.exec(whereClause)) !== null) {
+    if (match[5]) {
+      return whereClause.substring(0, match.index).trim();
     }
   }
-  return clause;
+  return whereClause.trim();
 }
 
 /** 判断是否为恒真条件 */
@@ -291,10 +289,10 @@ function isAlwaysTrueCondition(whereClause) {
   // 匹配常见的恒真条件
   // 移除了字符串自相等检查,因为它可能在某些场景下是合法的（例如 WHERE name = ''）
   const alwaysTruePatterns = [
-    /^\s*1\s*=\s*1\s*$/,
-    /^\s*2\s*>\s*1\s*$/,
-    /^\s*0\s*=\s*0\s*$/,
-    /^\s*'(?:''|[^'])*'\s*=\s*'(?:''|[^'])*'\s*$/, // 'a'='a' (支持包含特殊字符)
+    /\b1\s*=\s*1\b/,
+    /\b2\s*>\s*1\b/,
+    /\b0\s*=\s*0\b/,
+    /'(?:''|[^'])*'\s*=\s*'(?:''|[^'])*'/, // 'a'='a' (支持包含特殊字符)
   ];
   for (const pattern of alwaysTruePatterns) {
     if (pattern.test(upperClause)) {
