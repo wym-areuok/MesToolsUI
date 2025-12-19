@@ -136,10 +136,6 @@ function validateSqlServerSql(sql, operationType) {
     return { valid: false, message: 'SQL语句不能为空' };
   }
   const upperSql = trimmedSql.toUpperCase();
-  // 2. 通用校验：不允许执行批量SQL操作
-  if (isBatchOperation(trimmedSql)) {
-    return { valid: false, message: '不允许执行批量SQL操作' };
-  }
   // 3. 安全校验：通过分词检查关键字数量,防止多语句执行(如 UPDATE...DELETE)及危险操作
   // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.关键字
   const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
@@ -284,13 +280,6 @@ function isAlwaysTrueCondition(whereClause) {
     }
   }
   return false;
-}
-
-/** 检查是否为批处理操作 */
-function isBatchOperation(sql) {
-  // 检查是否包含多个SQL语句（以分号分隔）
-  const statements = sql.split(';').filter(s => s.trim());
-  return statements.length > 1;
 }
 
 /** 根据SQL关键字判断操作类型 */
