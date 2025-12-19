@@ -131,56 +131,118 @@ const {
 
 /** SQL语法检查 */
 function validateSqlServerSql(sql, operationType) {
-  const trimmedSql = sql.trim();
+  const trimmedSql = sql.replace(/\uFEFF/g, '').trim();
   if (!trimmedSql) {
     return { valid: false, message: 'SQL语句不能为空' };
   }
   const upperSql = trimmedSql.toUpperCase();
-  // 1. 通用校验：检查是否以正确的关键字开头
-  if (!upperSql.startsWith(operationType)) {
-    return { valid: false, message: `${operationType} 语句必须以 ${operationType} 开头` };
-  }
   // 2. 通用校验：不允许执行批量SQL操作
   if (isBatchOperation(trimmedSql)) {
     return { valid: false, message: '不允许执行批量SQL操作' };
   }
-  // 3. 通用校验：检查危险关键字 (对所有类型都适用，以防万一)
-  const dangerousKeywords = /\b(DROP|TRUNCATE|ALTER|CREATE)\b/i;
-  if (dangerousKeywords.test(upperSql) && operationType !== 'INSERT') { // INSERT 语句自身可能需要创建临时表等，可适当放宽
-    return { valid: false, message: '语句中包含危险关键字 (DROP, TRUNCATE, ALTER, CREATE)' };
+  // 3. 安全校验：通过分词检查关键字数量,防止多语句执行(如 UPDATE...DELETE)及危险操作
+  // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.关键字
+  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
+  const tokens = [...trimmedSql.matchAll(tokenRegex)];
+  const kwCounts = { SELECT: 0, UPDATE: 0, INSERT: 0, DELETE: 0, DANGEROUS: 0 };
+  let firstKeyword = null;
+  for (const match of tokens) {
+    if (match[1] || match[2] || match[3] || match[4]) continue; // 跳过注释、字符串和方括号标识符
+    const kw = match[5].toUpperCase();
+    if (!firstKeyword) firstKeyword = kw; // 记录找到的第一个有效关键字
+
+    if (['DROP', 'TRUNCATE', 'ALTER', 'CREATE', 'RENAME'].includes(kw)) {
+      kwCounts.DANGEROUS++;
+    } else {
+      kwCounts[kw] = (kwCounts[kw] || 0) + 1;
+    }
+  }
+  // 1. 通用校验：检查第一个有效关键字是否匹配操作类型 (忽略开头的注释)
+  if (!firstKeyword || firstKeyword !== operationType) {
+    return { valid: false, message: `${operationType} 语句必须以 ${operationType} 开头` };
+  }
+  // 检查危险关键字 (保留原逻辑：INSERT操作允许包含CREATE等,其他不允许)
+  if (operationType !== 'INSERT' && kwCounts.DANGEROUS > 0) {
+    return { valid: false, message: '语句中包含危险关键字 (DROP, TRUNCATE, ALTER, CREATE, RENAME)' };
+  }
+  // 检查混合操作/多语句 (即使没有分号也能检测)
+  if (operationType === 'SELECT') {
+    if (kwCounts.UPDATE > 0 || kwCounts.INSERT > 0 || kwCounts.DELETE > 0) {
+      return { valid: false, message: '查询语句不允许包含 UPDATE/INSERT/DELETE 操作' };
+    }
   }
   // 4. 特定操作类型的校验
   switch (operationType) {
     case 'UPDATE':
+    case 'INSERT':
     case 'DELETE':
-      // 检查必须包含WHERE条件
-      if (!upperSql.includes(' WHERE ')) {
+      // 确保主操作关键字数量为 1 (防止 UPDATE...UPDATE)
+      if (kwCounts[operationType] > 1) {
+        return { valid: false, message: `检测到多个 ${operationType} 关键字,禁止执行多条语句` };
+      }
+      // 检查是否包含其他 DML 关键字 (例如 UPDATE 中包含 DELETE)
+      const otherDmls = ['UPDATE', 'INSERT', 'DELETE'].filter(k => k !== operationType);
+      for (const other of otherDmls) {
+        if (kwCounts[other] > 0) {
+          return { valid: false, message: `${operationType} 语句不允许包含 ${other} 操作` };
+        }
+      }
+      // INSERT 不需要检查 WHERE
+      if (operationType === 'INSERT') break;
+      // 使用正则查找真正的 WHERE 关键字 (忽略注释、字符串、方括号)
+      const whereRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(\bWHERE\b)/gi;
+      const whereMatches = [...trimmedSql.matchAll(whereRegex)];
+      let rawWhereClause = null;
+      for (const match of whereMatches) {
+        if (match[1] || match[2] || match[3] || match[4]) continue;
+        if (match[5]) {
+          rawWhereClause = trimmedSql.substring(match.index + match[0].length);
+          break;
+        }
+      }
+      if (rawWhereClause === null) {
         return { valid: false, message: `${operationType} 操作必须包含WHERE条件以防止全表操作` };
       }
-      const whereClause = getWhereClause(upperSql);
+      // 清理 WHERE 子句：只去除注释,保留字符串内容
+      let cleanWhereClause = rawWhereClause.replace(/(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)/g, ' ');
+      // 移除后续子句和末尾分号
+      cleanWhereClause = removeSubsequentClauses(cleanWhereClause);
+      if (cleanWhereClause.trim().endsWith(';')) {
+        cleanWhereClause = cleanWhereClause.trim().slice(0, -1);
+      }
+      cleanWhereClause = cleanWhereClause.trim();
       // 检查WHERE条件是否为恒真条件
-      if (isAlwaysTrueCondition(whereClause)) {
-        return { valid: false, message: 'WHERE条件疑似为恒真条件(如 1=1)，操作被禁止' };
+      if (isAlwaysTrueCondition(cleanWhereClause)) {
+        return { valid: false, message: 'WHERE条件疑似为恒真条件(如 1=1),操作被禁止' };
       }
       // 检查WHERE条件是否包含等号(=)或IN子句指定精确条件效防止因缺少精确条件（如主键/唯一键）而导致的大范围更新或删除
-      const hasSpecificCondition = whereClause.includes('=') || whereClause.toUpperCase().includes(' IN ');
+      const hasSpecificCondition = cleanWhereClause.includes('=') || cleanWhereClause.toUpperCase().includes(' IN ');
       if (!hasSpecificCondition) {
-        return { valid: false, message: '高危操作的WHERE条件必须包含等号(=)或IN子句进行精确匹配，以防止大范围误操作。' };
+        return { valid: false, message: '高危操作的WHERE条件必须包含等号(=)或IN子句进行精确匹配,以防止大范围误操作。' };
       }
       break;
     case 'SELECT':
-      // 检查是否使用 TOP N 语法
-      const topRegex = /SELECT\s+(?:DISTINCT\s+)?TOP\s+(\d+)/i;
-      const match = trimmedSql.match(topRegex);
-      if (!match) {
-        return { valid: false, message: '查询语句必须使用 TOP N 语法 (例如: SELECT TOP 100 *)' };
-      }
-      const topValue = parseInt(match[1], 10);
-      if (isNaN(topValue) || topValue <= 0) {
-        return { valid: false, message: 'TOP N 中的 N 必须是一个正整数' };
-      }
-      if (topValue > 1000) {
-        return { valid: false, message: '查询最多不能超过 1000 条数据' };
+      // 检查所有 SELECT (包括子查询、联合查询) 是否都使用了 TOP N 语法
+      // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.SELECT关键字 6.TOP N
+      const selectRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(\bSELECT\b)(?:\s+(?:DISTINCT|ALL))?(?:\s+TOP(?:\s+|\s*\(\s*)(\d+))?/gi;
+      const matches = [...trimmedSql.matchAll(selectRegex)];
+      for (const match of matches) {
+        // 如果是注释、字符串或方括号标识符 跳过
+        if (match[1] || match[2] || match[3] || match[4]) {
+          continue;
+        }
+        // 这是一个 SELECT 语句匹配
+        const topN = match[6];
+        if (!topN) {
+          return { valid: false, message: '所有查询(包括子查询、联合查询)必须包含 TOP N 语法' };
+        }
+        const n = parseInt(topN, 10);
+        if (isNaN(n) || n <= 0) {
+          return { valid: false, message: 'TOP N 中的 N 必须是一个正整数' };
+        }
+        if (n > 1000) {
+          return { valid: false, message: `查询限制数量不能超过 1000 (检测到: ${n})` };
+        }
       }
       break;
     case 'INSERT':
@@ -190,24 +252,18 @@ function validateSqlServerSql(sql, operationType) {
   return { valid: true, message: '验证通过' };
 }
 
-/** 获取WHERE子句内容 */
-function getWhereClause(sql) {
-  const upperSql = sql.toUpperCase();
-  if (!upperSql.includes(' WHERE ')) {
-    return '';
-  }
-  const whereIndex = upperSql.lastIndexOf(' WHERE ');
-  let whereClause = sql.substring(whereIndex + 7).trim();
-  // 移除可能的ORDER BY, GROUP BY等后续子句因为没啥用
+/** 移除WHERE子句后的干扰项 */
+function removeSubsequentClauses(whereClause) {
+  let clause = whereClause;
   const nextClauses = [' ORDER BY ', ' GROUP BY ', ' HAVING '];
-  for (const clause of nextClauses) {
-    const clauseIndex = whereClause.toUpperCase().indexOf(clause);
+  for (const next of nextClauses) {
+    const clauseIndex = clause.toUpperCase().indexOf(next);
     if (clauseIndex > 0) {
-      whereClause = whereClause.substring(0, clauseIndex).trim();
+      clause = clause.substring(0, clauseIndex);
       break;
     }
   }
-  return whereClause;
+  return clause;
 }
 
 /** 判断是否为恒真条件 */
@@ -215,12 +271,12 @@ function isAlwaysTrueCondition(whereClause) {
   if (!whereClause) return false;
   const upperClause = whereClause.toUpperCase();
   // 匹配常见的恒真条件
-  // 移除了字符串自相等检查，因为它可能在某些场景下是合法的（例如 WHERE name = ''）
+  // 移除了字符串自相等检查,因为它可能在某些场景下是合法的（例如 WHERE name = ''）
   const alwaysTruePatterns = [
     /^\s*1\s*=\s*1\s*$/,
     /^\s*2\s*>\s*1\s*$/,
     /^\s*0\s*=\s*0\s*$/,
-    /^\s*'\w*'\s*=\s*'\w*'\s*$/, // 'a'='a'
+    /^\s*'(?:''|[^'])*'\s*=\s*'(?:''|[^'])*'\s*$/, // 'a'='a' (支持包含特殊字符)
   ];
   for (const pattern of alwaysTruePatterns) {
     if (pattern.test(upperClause)) {
@@ -239,18 +295,28 @@ function isBatchOperation(sql) {
 
 /** 根据SQL关键字判断操作类型 */
 function handleSmartExecute() {
-  const sql = formData.value.sqlContent?.trim().toUpperCase();
+  const sql = formData.value.sqlContent?.replace(/\uFEFF/g, '').trim();
   if (!sql) return;
-  if (sql.startsWith('SELECT')) {
+  // 使用正则提取第一个有效关键字 (忽略注释、字符串、方括号)
+  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE)\b/gi;
+  const matches = [...sql.matchAll(tokenRegex)];
+  let firstKeyword = null;
+  for (const match of matches) {
+    if (!match[1] && !match[2] && !match[3] && !match[4]) {
+      firstKeyword = match[5].toUpperCase();
+      break;
+    }
+  }
+  if (firstKeyword === 'SELECT') {
     handleQuery();
-  } else if (sql.startsWith('UPDATE')) {
+  } else if (firstKeyword === 'UPDATE') {
     handleUpdate();
-  } else if (sql.startsWith('INSERT')) {
+  } else if (firstKeyword === 'INSERT') {
     handleInsert();
-  } else if (sql.startsWith('DELETE')) {
+  } else if (firstKeyword === 'DELETE') {
     handleDelete();
   } else {
-    proxy.$message.warning('无法识别SQL操作类型，请点击对应按钮执行。');
+    proxy.$message.warning('无法识别SQL操作类型,请点击对应按钮执行。');
   }
 }
 
@@ -318,7 +384,7 @@ function handleDelete() {
       proxy.$message.error(validation.message);
       return;
     }
-    proxy.$confirm('删除操作不可恢复，确定要执行此删除操作吗？请再次确认WHERE条件正确无误。', '危险操作', {
+    proxy.$confirm('删除操作不可恢复,确定要执行此删除操作吗？请再次确认WHERE条件正确无误。', '危险操作', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'error'
@@ -370,7 +436,7 @@ async function executeSql(operationType) {
         success: true,
         time: executionTime,
         affectedRows: resultData.length,
-        message: `查询成功，返回 ${resultData.length} 条记录。`
+        message: `查询成功,返回 ${resultData.length} 条记录。`
       };
     } else {
       // 假设后端返回 { code: 200, msg: "操作成功", data: 1 } (data为影响行数)
