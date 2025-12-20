@@ -148,8 +148,8 @@ function validateSqlServerSql(sql, operationType) {
     return { valid: false, message: 'SQL语句不能为空' };
   }
   // 3. 安全校验：通过分词检查关键字数量,防止多语句执行(如 UPDATE...DELETE)及危险操作
-  // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.分号 6.关键字
-  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(;)|\b(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
+  // 正则匹配: 1.单行注释 2.多行注释 3.字符串(含N'xx') 4.方括号标识符 5.分号 6.关键字
+  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|(;)|\b(SELECT|UPDATE|INSERT|DELETE|DROP|TRUNCATE|ALTER|CREATE|RENAME)\b/gi;
   const tokens = [...trimmedSql.matchAll(tokenRegex)];
   const kwCounts = { SELECT: 0, UPDATE: 0, INSERT: 0, DELETE: 0, DANGEROUS: 0 };
   let firstKeyword = null;
@@ -206,7 +206,7 @@ function validateSqlServerSql(sql, operationType) {
       // INSERT 不需要检查 WHERE
       if (operationType === 'INSERT') break;
       // 使用正则查找真正的 WHERE 关键字 (忽略注释、字符串、方括号)
-      const whereRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(\bWHERE\b)/gi;
+      const whereRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|(\bWHERE\b)/gi;
       const whereMatches = [...trimmedSql.matchAll(whereRegex)];
       let rawWhereClause = null;
       for (const match of whereMatches) {
@@ -239,15 +239,15 @@ function validateSqlServerSql(sql, operationType) {
       break;
     case 'SELECT':
       // 检查所有 SELECT (包括子查询、联合查询) 是否都使用了 TOP N 语法
-      // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.SELECT关键字 6.TOP N
-      const selectRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|(\bSELECT\b)(?:\s+(?:DISTINCT|ALL))?(?:\s+TOP(?:\s+|\s*\(\s*)(\d+))?/gi;
+      // 正则匹配: 1.单行注释 2.多行注释 3.字符串 4.方括号标识符 5.SELECT关键字 6.TOP N (数字)
+      const selectRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|(\bSELECT\b)(?:\s+(?:DISTINCT|ALL))?(?:\s+TOP(?:\s+|\s*\(\s*)(\d+))?/gi;
       const matches = [...trimmedSql.matchAll(selectRegex)];
       for (const match of matches) {
         // 如果是注释、字符串或方括号标识符 跳过
         if (match[1] || match[2] || match[3] || match[4]) {
           continue;
         }
-        // 这是一个 SELECT 语句匹配
+        // SELECT 语句匹配
         const topN = match[6];
         if (!topN) {
           return { valid: false, message: '所有查询(包括子查询、联合查询)必须包含 TOP N 语法' };
@@ -262,7 +262,7 @@ function validateSqlServerSql(sql, operationType) {
       }
       break;
     case 'INSERT':
-      // INSERT 语句目前没有额外的严格限制
+      // INSERT 语句不需要额外校验 因为错了就插入失败并且只能插入一条语句
       break;
   }
   return { valid: true, message: '验证通过' };
@@ -272,7 +272,7 @@ function validateSqlServerSql(sql, operationType) {
 function removeSubsequentClauses(whereClause) {
   // 使用正则查找关键字，确保不匹配字符串或注释中的内容
   // Group 5 是我们要查找的截断关键字
-  const regex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|\b(ORDER\s+BY|GROUP\s+BY|HAVING)\b/gi;
+  const regex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|\b(ORDER\s+BY|GROUP\s+BY|HAVING)\b/gi;
   let match;
   while ((match = regex.exec(whereClause)) !== null) {
     if (match[5]) {
@@ -292,7 +292,7 @@ function isAlwaysTrueCondition(whereClause) {
     /\b1\s*=\s*1\b/,
     /\b2\s*>\s*1\b/,
     /\b0\s*=\s*0\b/,
-    /'(?:''|[^'])*'\s*=\s*'(?:''|[^'])*'/, // 'a'='a' (支持包含特殊字符)
+    /N?'(?:''|[^'])*'\s*=\s*N?'(?:''|[^'])*'/, // 'a'='a' (支持包含特殊字符)
   ];
   for (const pattern of alwaysTruePatterns) {
     if (pattern.test(upperClause)) {
@@ -307,7 +307,7 @@ function handleSmartExecute() {
   const sql = formData.value.sqlContent?.replace(/\uFEFF/g, '').trim();
   if (!sql) return;
   // 使用正则提取第一个有效关键字 (忽略注释、字符串、方括号)
-  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE)\b/gi;
+  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE)\b/gi;
   const matches = [...sql.matchAll(tokenRegex)];
   let firstKeyword = null;
   for (const match of matches) {
