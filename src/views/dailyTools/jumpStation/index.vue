@@ -52,50 +52,27 @@
       </el-row>
     </el-form>
 
-    <el-row>
-      <right-toolbar @queryTable="handleQuery" :columns="columns" :search="false" />
-    </el-row>
-    <!-- 数据表格 -->
-    <el-table v-loading="loading" :data="onlineList.slice((pageNum - 1) * pageSize, pageNum * pageSize)"
-      style="width: 100%" ref="tableRef">
-      <el-table-column label="序号" width="50" type="index" align="center" v-if="columns.index.visible">
-        <template #default="scope">
-          <span>{{ (pageNum - 1) * pageSize + scope.$index + 1 }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="SN序列号" align="center" prop="mcbSno" :show-overflow-tooltip="true"
-        v-if="columns.mcbSno.visible" />
-      <el-table-column label="工单号" align="center" prop="wkNo" :show-overflow-tooltip="true"
-        v-if="columns.wkNo.visible" />
-      <el-table-column label="机型" align="center" prop="model" :show-overflow-tooltip="true"
-        v-if="columns.model.visible" />
-      <el-table-column label="线别" align="center" prop="pdLine" :show-overflow-tooltip="true"
-        v-if="columns.pdLine.visible" />
-      <el-table-column label="当前站点" align="center" prop="wc" :show-overflow-tooltip="true" v-if="columns.wc.visible" />
-      <el-table-column label="下一站" align="center" prop="nwc" :show-overflow-tooltip="true" v-if="columns.nwc.visible" />
-      <el-table-column label="版本号" align="center" prop="rev" :show-overflow-tooltip="true" v-if="columns.rev.visible" />
-      <el-table-column label="PCB版本" align="center" prop="pcb" :show-overflow-tooltip="true"
-        v-if="columns.pcb.visible" />
-      <el-table-column label="是否过站" align="center" prop="isPass" :show-overflow-tooltip="true"
-        v-if="columns.isPass.visible" />
-      <el-table-column label="状态" align="center" prop="status" :show-overflow-tooltip="true"
-        v-if="columns.status.visible" />
-      <el-table-column label="PEN版本" align="center" prop="penNo" :show-overflow-tooltip="true"
-        v-if="columns.penNo.visible" />
-      <el-table-column label="创建时间" align="center" prop="cdt" :show-overflow-tooltip="true"
-        v-if="columns.cdt.visible" />
-      <el-table-column label="修改时间" align="center" prop="udt" :show-overflow-tooltip="true"
-        v-if="columns.udt.visible" />
-    </el-table>
-
-    <pagination v-show="total > 0" :total="total" v-model:page="pageNum" v-model:limit="pageSize" />
+    <!-- 动态结果展示区 -->
+    <el-card v-if="resultTable.data.length > 0" class="box-card">
+      <template #header>
+        <div class="card-header" style="font-size: 12px;">
+          <span>{{ resultTable.title }}</span>
+        </div>
+      </template>
+      <el-table v-loading="loading" :data="paginatedData" border stripe>
+        <!-- 动态生成列 -->
+        <el-table-column v-for="col in resultTable.columns" :key="col" :prop="col" :label="col" show-overflow-tooltip />
+      </el-table>
+      <pagination v-show="total > 0" :total="total" v-model:page="pageNum" v-model:limit="pageSize" />
+    </el-card>
+    <el-empty v-else description="暂无结果" style="margin-top: 5px;" />
   </div>
 </template>
 
 <script setup name="JumpStation">
 import {
-  list,
-  execute,
+  list as querySnList,
+  execute as executeJump,
   getStationList,
 } from "@/api/dailyTools/jumpStation";
 
@@ -106,7 +83,11 @@ const loading = ref(false);
 const total = ref(0);
 const pageNum = ref(1);
 const pageSize = ref(10);
-const onlineList = ref([]);
+const resultTable = reactive({
+  columns: [],
+  data: [],
+  title: '查询/执行结果'
+});
 
 // 定义校验规则常量
 const baseSnRules = [
@@ -202,25 +183,12 @@ const hasValidSnInput = computed(() => {
 
 /** 计算属性：是否有有效的查询结果 */
 const hasValidResult = computed(() => {
-  return onlineList.value && onlineList.value.length > 0;
+  return resultTable.data && resultTable.data.length > 0;
 });
 
-/* 定义表格列的可见性 */
-const columns = ref({
-  index: { label: '序号', visible: true },
-  mcbSno: { label: 'SN序列号', visible: true },
-  wkNo: { label: '工单号', visible: true },
-  model: { label: '机型', visible: true },
-  pdLine: { label: '线别', visible: true },
-  wc: { label: '当前站点', visible: true },
-  nwc: { label: '下一站', visible: true },
-  rev: { label: '版本号', visible: true },
-  pcb: { label: 'PCB版本', visible: true },
-  isPass: { label: '是否过站', visible: true },
-  status: { label: '状态', visible: true },
-  penNo: { label: 'PEN版本', visible: true },
-  cdt: { label: '创建时间', visible: true },
-  udt: { label: '修改时间', visible: true }
+/** 计算属性：用于前端分页的数据 */
+const paginatedData = computed(() => {
+  return resultTable.data.slice((pageNum.value - 1) * pageSize.value, pageNum.value * pageSize.value);
 });
 
 /** 表单提交 - 跳站操作 */
@@ -241,14 +209,24 @@ function submitForm() {
     proxy.$modal
       .confirm("是否确认执行跳站操作?")
       .then(() => {
-        return execute(data);
+        loading.value = true;
+        return executeJump(data);
       })
       .then((res) => {
-        proxy.$message.success(res.msg || "跳站成功");
-        handleQuery();
+        const resultData = res.data || [];
+        resultTable.title = '跳站执行结果';
+        if (resultData.length > 0) {
+          resultTable.columns = Object.keys(resultData[0]);
+          resultTable.data = resultData;
+          total.value = resultData.length;
+          proxy.$message.success(res.msg || "操作完成");
+        } else {
+          clearResultTable();
+          proxy.$message.info(res.msg || "操作完成，但没有返回结果数据。");
+        }
       })
       .finally(() => {
-        // 操作完成后不重置规则状态 保持当前规则以便后续操作
+        loading.value = false;
       });
   });
 }
@@ -257,9 +235,7 @@ function submitForm() {
 function resetForm() {
   formRef.value.resetFields();
   stationOptions.value = [];
-  onlineList.value = [];
-  total.value = 0;
-  pageNum.value = 1;
+  clearResultTable();
   // 重置所有校验规则到初始状态
   resetValidationRules();
   // 清除表单验证状态
@@ -268,6 +244,14 @@ function resetForm() {
       formRef.value.clearValidate();
     }
   }, 10);
+}
+
+/** 清空结果表格 */
+function clearResultTable() {
+  resultTable.columns = [];
+  resultTable.data = [];
+  total.value = 0;
+  pageNum.value = 1;
 }
 
 /** 重置校验规则到初始状态 */
@@ -304,9 +288,7 @@ function handleQuery() {
       proxy.$message.warning("请选择跳站类型");
       return;
     }
-    onlineList.value = [];
-    total.value = 0;
-    pageNum.value = 1;
+    clearResultTable();
     formData.value.remark = "";
     formData.value.sfc = "";
     loading.value = true;
@@ -315,14 +297,17 @@ function handleQuery() {
       jumpType: formData.value.jumpType,
       dbDataSource: formData.value.dbDataSource,
     };
-    list(query)
+    querySnList(query)
       .then((res) => {
-        onlineList.value = res.rows || [];
-        total.value = res.total || 0;
-        if (onlineList.value.length > 0) {
-          proxy.$message.success(`查询完成,共找到 ${onlineList.value.length} 条记录`);
+        const resultData = res.rows || [];
+        resultTable.title = 'SN 查询结果';
+        if (resultData.length > 0) {
+          resultTable.columns = Object.keys(resultData[0]);
+          resultTable.data = resultData;
+          total.value = res.total || resultData.length;
+          proxy.$message.success(`查询完成,共找到 ${total.value} 条记录`);
         } else {
-          proxy.$message.info('查询完成,未找到相关数据');
+          proxy.$message.info('查询完成,未找到相关数据。');
         }
         loading.value = false;
         // 回填SFC数据
@@ -366,10 +351,10 @@ function formatSfcWithStationNames(sfcPath) {
 function handleJumpTypeChange(value) {
   if (!value) {
     stationOptions.value = [];
-    formData.station = undefined;
+    formData.value.station = undefined;
     return;
   }
-  formData.station = undefined;
+  formData.value.station = undefined;
   getStationList({ jumpType: value })
     .then((response) => {
       if (response.data) {
@@ -389,3 +374,9 @@ function handleJumpTypeChange(value) {
     });
 }
 </script>
+
+<style scoped>
+.box-card :deep(.el-card__header) {
+  padding: 5px 5px;
+}
+</style>
