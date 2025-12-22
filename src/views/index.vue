@@ -4,11 +4,20 @@
     <el-card class="welcome-card" shadow="hover">
       <div class="welcome-header">
         <div class="welcome-text">
-          <h2 class="greet-title">欢迎使用 MES 工具箱</h2>
+          <h2 class="greet-title">
+            {{ greeting }}
+            <el-tag :type="systemStatus ? 'success' : 'danger'" effect="dark" size="small" round class="ml-10"
+              style="vertical-align: middle;">
+              {{ systemStatus ? '系统正常' : '服务异常' }}
+            </el-tag>
+            <el-tag type="info" effect="plain" size="small" round class="ml-10" style="vertical-align: middle;">
+              IP: {{ clientIp }}
+            </el-tag>
+          </h2>
           <p class="greet-desc">集成开发、运维与日常管理的综合效能平台。请从下方选择工具开始工作。</p>
           <div class="welcome-search mt-20">
-            <el-input v-model="searchKeyword" placeholder="输入关键词搜索知识库资料..." size="large" class="search-input"
-              @keyup.enter="handleGlobalSearch">
+            <el-input ref="searchInputRef" v-model="searchKeyword" placeholder="输入关键词搜索知识库资料... (Ctrl+K)" size="large"
+              class="search-input" @keyup.enter="handleGlobalSearch">
               <template #append><el-button icon="Search" @click="handleGlobalSearch" /></template>
             </el-input>
           </div>
@@ -85,7 +94,7 @@
             </div>
           </template>
           <div class="about-section">
-            <p>MES Tools UI 是基于 Vue3 + Element Plus 构建的生产力工具集合。<br>
+            <p>MES Tools UI 是基于 Vue3 + Element Plus 构建的工具集合。<br>
               如果在使用过程中遇到问题，请联系管理员。</p>
             <div class="tech-tags">
               <el-tag class="mr-5">Vue 3</el-tag>
@@ -101,16 +110,23 @@
 
 <script setup name="Index">
 import { useRouter } from 'vue-router';
-import { reactive, onMounted, ref } from 'vue';
+import { reactive, onMounted, onUnmounted, ref, computed } from 'vue';
 import { list as getQueryInfoList } from '@/api/dailyTools/queryInfo';
+import useUserStore from '@/store/modules/user';
+import { getInfo } from '@/api/login';
 
 const router = useRouter()
+const userStore = useUserStore()
 const searchKeyword = ref('')
+const searchInputRef = ref(null)
+const clientIp = ref('Loading...')
+const systemStatus = ref(true)
 
 // 更新日志数据
 const updateLogs = [
-  { timestamp: '2025-12-30', title: 'MES工具箱上线', content: '集成SQL执行、跳站、密码修改等核心功能。', type: 'primary' },
-  { timestamp: '2025-12-10', title: '功能内测', content: '字符串处理工具上线测试。', color: '#E6A23C' }
+  { timestamp: '2025-12-20', title: 'MES工具箱测试完成', content: '集成SQL执行、跳站、密码修改等功能。', type: 'primary' },
+  { timestamp: '2025-12-10', title: '功能初步完成进行测试', content: '功能初步完成进行测试。', color: '#E6A23C' },
+  { timestamp: '2025-11-20', title: '项目开始', content: '没有内容。', type: 'primary' },
 ]
 
 // 工具列表配置
@@ -158,6 +174,18 @@ const toolList = reactive([
   }
 ])
 
+// 动态问候语
+const greeting = computed(() => {
+  const hour = new Date().getHours()
+  let timeText = ''
+  if (hour < 12) timeText = '上午好'
+  else if (hour < 18) timeText = '下午好'
+  else timeText = '晚上好'
+
+  const name = userStore.nickName || userStore.name || '用户'
+  return `${timeText}，${name}！`
+})
+
 onMounted(() => {
   // 获取资料查询的总数
   getQueryInfoList({ pageNum: 1, pageSize: 1 }).then(res => {
@@ -166,7 +194,34 @@ onMounted(() => {
       infoTool.count = res.total
     }
   }).catch(e => console.log('获取资料统计失败', e))
+
+  // 获取用户信息(IP)及检测系统状态
+  getInfo().then(res => {
+    if (res.user && res.user.loginIp) {
+      clientIp.value = res.user.loginIp
+    } else {
+      clientIp.value = '未知'
+    }
+    systemStatus.value = true
+  }).catch(() => {
+    clientIp.value = '获取失败'
+    systemStatus.value = false
+  })
+
+  // 绑定快捷键
+  window.addEventListener('keydown', handleKeydown)
 })
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
+
+function handleKeydown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault()
+    searchInputRef.value?.focus()
+  }
+}
 
 function handleNav(path) {
   router.push(path)
@@ -223,12 +278,20 @@ function handleGlobalSearch() {
     margin-top: 5px;
   }
 
+  .mt-10 {
+    margin-top: 10px;
+  }
+
   .mb-20 {
     margin-bottom: 20px;
   }
 
   .mr-5 {
     margin-right: 5px;
+  }
+
+  .ml-10 {
+    margin-left: 10px;
   }
 
   .card-header {
