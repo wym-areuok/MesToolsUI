@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <el-row>
-      <el-col :span="9" :offset="1">
+      <el-col :span="10" :offset="1">
         <el-form ref="formRef" :model="formData" :rules="rules" size="default" label-position="top">
           <el-form-item label="数据源" prop="dbDataSource">
             <el-select v-model="formData.dbDataSource" placeholder="请选择数据源" clearable style="width: 240px;">
@@ -13,7 +13,7 @@
             <div class="editor-container">
               <codemirror v-model="formData.sqlContent" placeholder="在此输入SQL语句..."
                 :style="{ height: '500px', width: '100%' }" :autofocus="true" :indent-with-tab="true" :tab-size="2"
-                :extensions="extensions" @keydown.ctrl.enter.prevent="handleSmartExecute" />
+                :extensions="extensions" @ready="handleReady" @keydown.ctrl.enter.prevent="handleSmartExecute" />
             </div>
           </el-form-item>
 
@@ -36,18 +36,25 @@
         </el-form>
       </el-col>
 
-      <el-col :span="13" :offset="1">
+      <el-col :span="13">
         <el-tabs v-model="activeTab" class="result-tabs">
           <el-tab-pane label="执行结果" name="result">
             <div class="result-panel">
-              <div v-if="executionInfo" class="execution-info">
-                <el-tag :type="executionInfo.success ? 'success' : 'danger'" effect="dark">
-                  {{ executionInfo.success ? '执行成功' : '执行失败' }}
-                </el-tag>
-                <span class="info-item">耗时: {{ executionInfo.time }}ms</span>
-                <span v-if="executionInfo.affectedRows !== null" class="info-item">
-                  影响行数: {{ executionInfo.affectedRows }}
-                </span>
+              <div v-if="executionInfo">
+                <div class="execution-info">
+                  <el-tag :type="executionInfo.success ? 'success' : 'danger'" effect="dark">
+                    {{ executionInfo.success ? '执行成功' : '执行失败' }}
+                  </el-tag>
+                  <span class="info-item">耗时: {{ executionInfo.time }}ms</span>
+                  <span v-if="executionInfo.affectedRows !== null" class="info-item">
+                    影响行数: {{ executionInfo.affectedRows }}
+                  </span>
+                </div>
+                <div class="execution-scope">
+                  <el-tag effect="dark" type="warning">
+                    执行范围: {{ executionInfo.scope }}
+                  </el-tag>
+                </div>
               </div>
               <div v-if="queryResult.data.length > 0" class="table-wrapper">
                 <el-table :data="queryResult.data" border stripe height="100%" v-loading="loading">
@@ -89,6 +96,7 @@ import { executeQuery, executeUpdate, executeInsert, executeDelete } from '@/api
 import { Codemirror } from 'vue-codemirror'
 import { sql } from '@codemirror/lang-sql'
 import { EditorView } from '@codemirror/view'
+import { shallowRef, ref, reactive, toRefs, getCurrentInstance } from 'vue'
 
 const {
   proxy
@@ -98,6 +106,11 @@ const { db_info } = proxy.useDict("db_info");
 const formRef = ref()
 const loading = ref(false)
 const activeTab = ref('result')
+
+const editorView = shallowRef()
+const handleReady = (payload) => {
+  editorView.value = payload.view
+}
 
 const extensions = [sql(), EditorView.lineWrapping]
 // 执行结果 { success: bool, time: number, affectedRows: number|null, message: string }
@@ -304,9 +317,22 @@ function isAlwaysTrueCondition(whereClause) {
   return false;
 }
 
+/** 获取需要执行的SQL (选中内容或全部内容) */
+function getSqlToExecute() {
+  if (editorView.value) {
+    const state = editorView.value.state
+    const selection = state.sliceDoc(state.selection.main.from, state.selection.main.to)
+    if (selection && selection.trim()) {
+      return { sql: selection, scope: '选中区SQL' }
+    }
+  }
+  return { sql: formData.value.sqlContent, scope: '全部SQL' }
+}
+
 /** 根据SQL关键字判断操作类型 */
 function handleSmartExecute() {
-  const sql = formData.value.sqlContent?.replace(/\uFEFF/g, '').trim();
+  const { sql: rawSql } = getSqlToExecute();
+  const sql = rawSql?.replace(/\uFEFF/g, '').trim();
   if (!sql) return;
   // 使用正则提取第一个有效关键字 (忽略注释、字符串、方括号)
   const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE)\b/gi;
@@ -335,12 +361,13 @@ function handleSmartExecute() {
 function handleQuery() {
   formRef.value.validate((valid) => {
     if (!valid) return;
-    const validation = validateSqlServerSql(formData.value.sqlContent, 'SELECT');
+    const { sql, scope } = getSqlToExecute();
+    const validation = validateSqlServerSql(sql, 'SELECT');
     if (!validation.valid) {
       proxy.$message.error(validation.message);
       return;
     }
-    executeSql('SELECT');
+    executeSql('SELECT', sql, scope);
   });
 }
 
@@ -348,7 +375,8 @@ function handleQuery() {
 function handleUpdate() {
   formRef.value.validate((valid) => {
     if (!valid) return;
-    const validation = validateSqlServerSql(formData.value.sqlContent, 'UPDATE');
+    const { sql, scope } = getSqlToExecute();
+    const validation = validateSqlServerSql(sql, 'UPDATE');
     if (!validation.valid) {
       proxy.$message.error(validation.message);
       return;
@@ -358,7 +386,7 @@ function handleUpdate() {
       cancelButtonText: '取消',
       type: 'warning'
     }).then(() => {
-      executeSql('UPDATE');
+      executeSql('UPDATE', sql, scope);
     }).catch(() => {
       proxy.$message.info('已取消操作');
     });
@@ -369,7 +397,8 @@ function handleUpdate() {
 function handleInsert() {
   formRef.value.validate((valid) => {
     if (!valid) return;
-    const validation = validateSqlServerSql(formData.value.sqlContent, 'INSERT');
+    const { sql, scope } = getSqlToExecute();
+    const validation = validateSqlServerSql(sql, 'INSERT');
     if (!validation.valid) {
       proxy.$message.error(validation.message);
       return;
@@ -379,7 +408,7 @@ function handleInsert() {
       cancelButtonText: '取消',
       type: 'warning'
     }).then(() => {
-      executeSql('INSERT');
+      executeSql('INSERT', sql, scope);
     }).catch(() => {
       proxy.$message.info('已取消操作');
     });
@@ -390,7 +419,8 @@ function handleInsert() {
 function handleDelete() {
   formRef.value.validate((valid) => {
     if (!valid) return;
-    const validation = validateSqlServerSql(formData.value.sqlContent, 'DELETE');
+    const { sql, scope } = getSqlToExecute();
+    const validation = validateSqlServerSql(sql, 'DELETE');
     if (!validation.valid) {
       proxy.$message.error(validation.message);
       return;
@@ -400,7 +430,7 @@ function handleDelete() {
       cancelButtonText: '取消',
       type: 'error'
     }).then(() => {
-      executeSql('DELETE');
+      executeSql('DELETE', sql, scope);
     }).catch(() => {
       proxy.$message.info('已取消操作');
     });
@@ -408,14 +438,14 @@ function handleDelete() {
 }
 
 /** 执行SQL的通用方法 */
-async function executeSql(operationType) {
+async function executeSql(operationType, sqlContent, scope) {
   // 重置之前的结果
   clearResults();
   activeTab.value = 'result';
   loading.value = true;
   const requestData = {
     dbDataSource: formData.value.dbDataSource,
-    sqlContent: formData.value.sqlContent
+    sqlContent: sqlContent
   };
   try {
     const startTime = new Date();
@@ -447,7 +477,8 @@ async function executeSql(operationType) {
         success: true,
         time: executionTime,
         affectedRows: resultData.length,
-        message: `查询成功,返回 ${resultData.length} 条记录。`
+        message: `查询成功,返回 ${resultData.length} 条记录。`,
+        scope: scope
       };
     } else {
       // 假设后端返回 { code: 200, msg: "操作成功", data: 1 } (data为影响行数)
@@ -455,19 +486,21 @@ async function executeSql(operationType) {
         success: true,
         time: executionTime,
         affectedRows: response.data || 0,
-        message: `${response.msg} (影响行数: ${response.data || 0})`
+        message: `${response.msg} (影响行数: ${response.data || 0})`,
+        scope: scope
       };
     }
-    addLog(operationType, true, executionTime, formData.value.sqlContent);
+    addLog(operationType, true, executionTime, sqlContent);
   } catch (error) {
     const errorMessage = error.message || error.msg || '未知错误';
     executionInfo.value = {
       success: false,
       time: 0,
       affectedRows: null,
-      message: errorMessage
+      message: errorMessage,
+      scope: scope
     };
-    addLog(operationType, false, 0, formData.value.sqlContent, errorMessage);
+    addLog(operationType, false, 0, sqlContent, errorMessage);
     console.error('SQL执行失败：', error);
   } finally {
     loading.value = false;
@@ -536,11 +569,15 @@ function resetForm() {
 }
 
 .execution-info {
-  margin-bottom: 15px;
   display: flex;
   align-items: center;
   gap: 20px;
   font-size: 14px;
+}
+
+.execution-scope {
+  margin-top: 5px;
+  margin-bottom: 5px;
 }
 
 .log-sql {
