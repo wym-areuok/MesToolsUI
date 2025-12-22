@@ -17,6 +17,11 @@
                <el-option v-for="dict in info_type" :key="dict.value" :label="dict.label" :value="dict.value" />
             </el-select>
          </el-form-item>
+         <el-form-item label="状态" prop="status">
+            <el-select v-model="queryParams.status" placeholder="资料状态" clearable style="width: 140px">
+               <el-option v-for="dict in info_status" :key="dict.value" :label="dict.label" :value="dict.value" />
+            </el-select>
+         </el-form-item>
          <el-form-item>
             <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
             <el-button icon="Refresh" @click="resetQuery">重置</el-button>
@@ -50,7 +55,11 @@
       <el-table v-loading="loading" :data="infoList" height="calc(100vh - 310px)"
          @selection-change="handleSelectionChange">
          <el-table-column type="selection" width="50" align="center" />
-         <el-table-column label="序号" align="center" prop="infoId" width="80" fixed />
+         <el-table-column label="序号" align="center" width="80" fixed>
+            <template #default="scope">
+               <span>{{ (queryParams.pageNum - 1) * queryParams.pageSize + scope.$index + 1 }}</span>
+            </template>
+         </el-table-column>
          <el-table-column label="资料标题" align="center" prop="infoTitle" :show-overflow-tooltip="true" fixed />
          <el-table-column label="标签" align="center" :show-overflow-tooltip="true">
             <template #default="scope">
@@ -60,8 +69,16 @@
                </el-tag>
             </template>
          </el-table-column>
-         <el-table-column label="类型" align="center" prop="infoType" />
-         <el-table-column label="状态" align="center" prop="status" />
+         <el-table-column label="类型" align="center" prop="infoType">
+            <template #default="scope">
+               <dict-tag :options="info_type" :value="scope.row.infoType" />
+            </template>
+         </el-table-column>
+         <el-table-column label="状态" align="center" prop="status">
+            <template #default="scope">
+               <dict-tag :options="info_status" :value="scope.row.status" />
+            </template>
+         </el-table-column>
          <el-table-column label="搜索次数" align="center" prop="searchCount" sortable />
          <el-table-column label="创建者" align="center" prop="createBy" />
          <el-table-column label="创建时间" align="center" prop="createTime" sortable>
@@ -71,6 +88,8 @@
          </el-table-column>
          <el-table-column label="操作" align="center" class-name="small-padding fixed-width">
             <template #default="scope">
+               <el-button link type="primary" icon="View" @click="handleView(scope.row)"
+                  v-hasPermi="['dailyTools:queryInfo:list']">查看</el-button>
                <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)"
                   v-hasPermi="['dailyTools:queryInfo:edit']">修改</el-button>
                <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)"
@@ -110,8 +129,8 @@
                <el-col :span="12">
                   <el-form-item label="状态" prop="status">
                      <el-radio-group v-model="form.status">
-                        <el-radio v-for="dict in sys_normal_disable" :key="dict.value" :value="dict.value">{{ dict.label
-                           }}</el-radio>
+                        <el-radio v-for="dict in info_status" :key="dict.value" :value="dict.value">{{ dict.label
+                        }}</el-radio>
                      </el-radio-group>
                   </el-form-item>
                </el-col>
@@ -124,7 +143,7 @@
          </el-form>
          <template #footer>
             <div class="dialog-footer">
-               <el-button type="primary" @click="submitForm">确 定</el-button>
+               <el-button type="primary" @click="submitForm" v-if="title !== '资料详情'">确 定</el-button>
                <el-button @click="cancel">取 消</el-button>
             </div>
          </template>
@@ -161,14 +180,16 @@
 <script setup name="QueryInfo">
 import { list, getInfo, deleteInfo, addInfo, updateInfo } from "@/api/dailyTools/queryInfo";
 import { getToken } from "@/utils/auth";
+import { useRoute } from "vue-router";
 
 const { proxy } = getCurrentInstance();
-const { sys_normal_disable, info_type, info_tags } = proxy.useDict(
-   "sys_normal_disable",
+const { info_status, info_type, info_tags } = proxy.useDict(
+   "info_status",
    "info_type",
    "info_tags"
 );
 
+const route = useRoute();
 const infoList = ref([]);
 const open = ref(false);
 const loading = ref(false);
@@ -203,6 +224,7 @@ const data = reactive({
       infoTitle: undefined,
       infoTags: [],
       infoType: undefined,
+      status: undefined,
    },
    rules: {
       infoTitle: [
@@ -291,6 +313,24 @@ function handleAdd() {
    reset();
    open.value = true;
    title.value = "新增资料";
+}
+
+/** 查看 */
+async function handleView(row) {
+   try {
+      reset();
+      const infoId = row.infoId;
+      const res = await getInfo(infoId);
+      form.value = {
+         ...res.data,
+         infoTags: res.data.infoTags ? res.data.infoTags.split(",") : [],
+      };
+      open.value = true;
+      title.value = "资料详情";
+   } catch (error) {
+      console.error("获取资料详情失败:", error);
+      proxy.$modal.msgError(error.message || "获取资料详情失败,请重试");
+   }
 }
 
 /** 修改 */
@@ -481,6 +521,10 @@ function cancel() {
 
 /** 页面加载时执行 获取列表数据 */
 onMounted(() => {
+   // 接收路由参数中的 keyword 并自动搜索
+   if (route.query.keyword) {
+      queryParams.value.infoTitle = route.query.keyword;
+   }
    getList();
 });
 </script>
