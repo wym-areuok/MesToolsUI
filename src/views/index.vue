@@ -16,7 +16,7 @@
           </h2>
           <p class="greet-desc">集成开发、运维与日常管理的综合效能平台。请从下方选择工具开始工作。</p>
           <div class="welcome-search mt-20">
-            <el-input ref="searchInputRef" v-model="searchKeyword" placeholder="输入关键词搜索知识库资料... (Ctrl+K)" size="large"
+            <el-input ref="searchInputRef" v-model="searchKeyword" placeholder="搜索工具或知识库资料... (Ctrl+K)" size="large"
               class="search-input" @keyup.enter="handleGlobalSearch">
               <template #append><el-button icon="Search" @click="handleGlobalSearch" /></template>
             </el-input>
@@ -40,8 +40,8 @@
             </div>
           </template>
           <el-row :gutter="20">
-            <el-col :xs="12" :sm="8" :md="8" :lg="6" v-for="(tool, index) in toolList" :key="index" class="mb-20"
-              v-hasPermi="tool.permissions">
+            <el-col :xs="12" :sm="8" :md="8" :lg="6" v-for="(tool, index) in filteredToolList" :key="index"
+              class="mb-20" v-hasPermi="tool.permissions">
               <div class="tool-item" @click="handleNav(tool.path)">
                 <div class="tool-icon" :style="{ backgroundColor: tool.bgColor }">
                   <el-icon :size="24" color="#fff">
@@ -184,6 +184,16 @@ const greeting = computed(() => {
 
   const name = userStore.nickName || userStore.name || '用户'
   return `${timeText}，${name}！`
+})
+
+// 搜索过滤工具列表
+const filteredToolList = computed(() => {
+  if (!searchKeyword.value) return toolList
+  const keyword = searchKeyword.value.toLowerCase()
+  return toolList.filter(tool =>
+    tool.title.toLowerCase().includes(keyword) ||
+    tool.desc.toLowerCase().includes(keyword)
+  )
 })
 
 onMounted(() => {
