@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <el-row>
-      <el-col :span="12" :offset="1">
+      <el-col :span="9" :offset="1">
         <el-form ref="formRef" :model="formData" :rules="rules" size="default" label-position="top">
           <el-form-item label="数据源" prop="dbDataSource">
             <el-select v-model="formData.dbDataSource" placeholder="请选择数据源" clearable style="width: 240px;">
@@ -11,9 +11,9 @@
 
           <el-form-item label="SQL 编辑器 (Ctrl+Enter执行)" prop="sqlContent">
             <div class="editor-container">
-              <codemirror v-model="formData.sqlContent" placeholder="在此输入SQL语句..." :style="{ height: '400px' }"
-                :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="extensions"
-                @keydown.ctrl.enter.prevent="handleSmartExecute" />
+              <codemirror v-model="formData.sqlContent" placeholder="在此输入SQL语句..."
+                :style="{ height: '500px', width: '100%' }" :autofocus="true" :indent-with-tab="true" :tab-size="2"
+                :extensions="extensions" @keydown.ctrl.enter.prevent="handleSmartExecute" />
             </div>
           </el-form-item>
 
@@ -36,7 +36,7 @@
         </el-form>
       </el-col>
 
-      <el-col :span="11">
+      <el-col :span="13" :offset="1">
         <el-tabs v-model="activeTab" class="result-tabs">
           <el-tab-pane label="执行结果" name="result">
             <div class="result-panel">
@@ -49,11 +49,12 @@
                   影响行数: {{ executionInfo.affectedRows }}
                 </span>
               </div>
-              <el-table v-if="queryResult.data.length > 0" :data="queryResult.data" border stripe height="400px"
-                v-loading="loading">
-                <el-table-column v-for="col in queryResult.columns" :key="col" :prop="col" :label="col"
-                  show-overflow-tooltip />
-              </el-table>
+              <div v-if="queryResult.data.length > 0" class="table-wrapper">
+                <el-table :data="queryResult.data" border stripe height="100%" v-loading="loading">
+                  <el-table-column v-for="col in queryResult.columns" :key="col" :prop="col" :label="col"
+                    show-overflow-tooltip />
+                </el-table>
+              </div>
               <el-alert v-else-if="executionInfo" :title="executionInfo.message"
                 :type="executionInfo.success ? 'info' : 'error'" :closable="false" show-icon />
 
@@ -87,6 +88,7 @@
 import { executeQuery, executeUpdate, executeInsert, executeDelete } from '@/api/dailyTools/executeSql'
 import { Codemirror } from 'vue-codemirror'
 import { sql } from '@codemirror/lang-sql'
+import { EditorView } from '@codemirror/view'
 
 const {
   proxy
@@ -97,7 +99,7 @@ const formRef = ref()
 const loading = ref(false)
 const activeTab = ref('result')
 
-const extensions = [sql()]
+const extensions = [sql(), EditorView.lineWrapping]
 // 执行结果 { success: bool, time: number, affectedRows: number|null, message: string }
 const executionInfo = ref(null)
 const queryResult = reactive({
@@ -503,12 +505,30 @@ function resetForm() {
 .editor-container {
   border: 1px solid #dcdfe6;
   border-radius: 4px;
+  overflow: hidden;
+  max-width: 100%;
+  width: 100%;
+}
+
+/* 强制长单词换行，防止撑开容器 */
+:deep(.cm-content) {
+  word-break: break-all;
 }
 
 .result-tabs,
-.result-panel,
 .log-panel {
-  height: 500px;
+  height: 600px;
+}
+
+.result-panel {
+  height: 600px;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-wrapper {
+  flex: 1;
+  overflow: hidden;
 }
 
 .log-panel {
