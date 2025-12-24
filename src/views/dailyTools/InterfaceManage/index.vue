@@ -12,10 +12,11 @@
       <div class="api-tree-wrapper">
         <el-tree ref="treeRef" :data="apiTreeData" :props="defaultProps" :expand-on-click-node="false"
           :filter-node-method="filterNode" node-key="id" default-expand-all highlight-current
-          @node-click="handleNodeClick">
+          @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
           <template #default="{ node, data }">
             <span class="custom-tree-node">
-              <span v-if="data.method" :class="['method-tag', `method-${data.method}`]">{{ data.method }}</span>
+              <span v-if="data.method" :class="['method-tag', `method-${data.method}`]">{{ data.method
+              }}</span>
               <span v-else class="folder-icon"><el-icon>
                   <Folder />
                 </el-icon></span>
@@ -23,6 +24,22 @@
             </span>
           </template>
         </el-tree>
+      </div>
+      <!-- 自定义右键菜单 -->
+      <div v-if="contextMenu.visible" :style="{ left: contextMenu.left + 'px', top: contextMenu.top + 'px' }"
+        class="context-menu">
+        <div class="menu-item" @click="handleContextMenu('addChild')"><el-icon>
+            <Plus />
+          </el-icon> 新增子节点</div>
+        <div class="menu-item" @click="handleContextMenu('rename')"><el-icon>
+            <EditPen />
+          </el-icon> 重命名</div>
+        <div class="menu-item danger" @click="handleContextMenu('delete')"><el-icon>
+            <Delete />
+          </el-icon> 删除</div>
+      </div>
+      <div v-if="contextMenu.visible" class="context-menu-mask" @click="contextMenu.visible = false"
+        @contextmenu.prevent="contextMenu.visible = false">
       </div>
     </div>
 
@@ -77,9 +94,9 @@
 
       <!-- 核心工作区 -->
       <div class="workspace">
-        <el-row style="height: 100%; width: 100%; margin: 0">
+        <splitpanes class="default-theme" @resize="paneSize = $event[0].size">
           <!-- 左侧：请求配置 -->
-          <el-col :span="14" style="height: 100%">
+          <pane :size="60">
             <div class="request-panel">
               <el-tabs v-model="activeReqTab" class="custom-tabs">
                 <el-tab-pane label="Params" name="params">
@@ -176,15 +193,34 @@
 
                 <el-tab-pane label="响应定义" name="responseDef">
                   <div class="panel-content">
-                    <el-empty description="暂无响应定义，可从右侧响应结果导入" :image-size="80" />
+                    <div v-if="responseDefList.length > 0">
+                      <el-table :data="responseDefList" style="width: 100%" size="small" border>
+                        <el-table-column label="字段名" prop="key" width="180" />
+                        <el-table-column label="类型" prop="type" width="100" />
+                        <el-table-column label="备注">
+                          <template #default="scope">
+                            <el-input v-model="scope.row.desc" placeholder="请输入备注" size="small" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column width="50" align="center">
+                          <template #default="scope">
+                            <el-button link type="danger" icon="Delete"
+                              @click="removeRow(responseDefList, scope.$index)" />
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                    </div>
+                    <div v-else>
+                      <el-empty description="暂无响应定义，可从右侧响应结果导入" :image-size="80" />
+                    </div>
                   </div>
                 </el-tab-pane>
               </el-tabs>
             </div>
-          </el-col>
+          </pane>
 
           <!-- 右侧：响应结果 -->
-          <el-col :span="10" style="height: 100%">
+          <pane :size="40">
             <div class="response-panel">
               <el-tabs v-model="activeResTab" class="custom-tabs">
                 <el-tab-pane label="当前响应" name="response">
@@ -195,6 +231,8 @@
                       </el-tag>
                       <span class="meta-item">耗时: {{ responseInfo.time }}ms</span>
                       <span class="meta-item">大小: {{ responseInfo.size }}</span>
+                      <el-button type="primary" link size="small" style="margin-left: auto;"
+                        @click="handleImportResponse">导入为响应结构</el-button>
                     </div>
                     <div class="editor-wrapper" v-if="responseInfo">
                       <codemirror v-model="responseInfo.data" :style="{ height: '100%' }" :extensions="extensions"
@@ -218,8 +256,8 @@
                 </el-tab-pane>
               </el-tabs>
             </div>
-          </el-col>
-        </el-row>
+          </pane>
+        </splitpanes>
       </div>
     </div>
 
@@ -267,6 +305,19 @@
         </span>
       </template>
     </el-dialog>
+
+    <!-- 生成代码弹窗 -->
+    <el-dialog v-model="generateCodeVisible" title="生成代码" width="700px">
+      <div class="code-generator-dialog">
+        <el-tabs v-model="generatedCodeType">
+          <el-tab-pane label="Axios" name="axios"></el-tab-pane>
+          <el-tab-pane label="Fetch" name="fetch" disabled></el-tab-pane>
+        </el-tabs>
+        <el-button type="primary" link icon="CopyDocument" class="copy-btn" @click="copyGeneratedCode">复制</el-button>
+        <codemirror v-model="generatedCode" :style="{ height: '400px' }" :autofocus="true" :indent-with-tab="true"
+          :tab-size="2" :extensions="codeGenExtensions" :disabled="true" />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -274,6 +325,9 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { Codemirror } from 'vue-codemirror'
 import { json } from '@codemirror/lang-json'
+import { Splitpanes, Pane } from "splitpanes"
+import "splitpanes/dist/splitpanes.css"
+import { javascript } from '@codemirror/lang-javascript'
 import { ElMessage } from 'element-plus'
 
 // --- 状态定义 ---
@@ -287,9 +341,20 @@ const curlDialogVisible = ref(false)
 const curlInput = ref('')
 const createDialogVisible = ref(false)
 const createFormRef = ref(null)
+const generateCodeVisible = ref(false)
+const generatedCode = ref('')
+const generatedCodeType = ref('axios')
+const contextMenu = reactive({
+  visible: false,
+  left: 0,
+  top: 0,
+  node: null
+})
+const responseDefList = ref([])
 
 // Codemirror 扩展
 const extensions = [json()]
+const codeGenExtensions = [javascript()]
 
 // 接口树数据 (模拟)
 const apiTreeData = ref([
@@ -431,6 +496,10 @@ const formatJson = () => {
 const handleSend = () => {
   loading.value = true
   const finalUrl = currentBaseUrl.value + requestForm.url
+
+  // 创建请求快照 (深拷贝)
+  const snapshot = JSON.parse(JSON.stringify(requestForm))
+
   setTimeout(() => {
     loading.value = false
     responseInfo.value = {
@@ -447,7 +516,8 @@ const handleSend = () => {
       method: requestForm.method,
       url: finalUrl,
       status: 200,
-      duration: 156
+      duration: 156,
+      snapshot: snapshot
     })
   }, 800)
 }
@@ -513,7 +583,47 @@ const handleSave = () => {
 }
 
 const handleGenerateCode = () => {
-  ElMessage.info('代码生成功能开发中...')
+  const { method, url, params, headers, bodyType, bodyJson } = requestForm;
+  const finalUrl = currentBaseUrl.value + url;
+
+  let code = `import axios from 'axios';\n\n`;
+
+  // 处理 Params
+  const activeParams = params.filter(p => p.active && p.key);
+  let paramsStr = '';
+  if (activeParams.length > 0) {
+    paramsStr = `params: {\n` + activeParams.map(p => `    '${p.key}': '${p.value}'`).join(',\n') + `\n  },`;
+  }
+
+  // 处理 Headers
+  const activeHeaders = headers.filter(h => h.active && h.key);
+  let headersStr = '';
+  if (activeHeaders.length > 0) {
+    headersStr = `headers: {\n` + activeHeaders.map(h => `    '${h.key}': '${h.value}'`).join(',\n') + `\n  },`;
+  }
+
+  // 处理 Body
+  let dataStr = '';
+  if (method.toUpperCase() !== 'GET' && bodyType === 'json' && bodyJson.trim() !== '{}') {
+    try {
+      // 尝试格式化，如果失败则按原样使用
+      const formattedBody = JSON.stringify(JSON.parse(bodyJson), null, 2);
+      dataStr = `data: ${formattedBody},`;
+    } catch (e) {
+      dataStr = `data: ${bodyJson},`;
+    }
+  }
+
+  code += `axios({\n`
+  code += `  method: '${method.toLowerCase()}',\n`
+  code += `  url: '${finalUrl}',\n`
+  if (paramsStr) code += `  ${paramsStr}\n`
+  if (headersStr) code += `  ${headersStr}\n`
+  if (dataStr) code += `  ${dataStr}\n`
+  code += `}).then(res => {\n  console.log(res.data);\n}).catch(err => {\n  console.error(err);\n});`
+
+  generatedCode.value = code;
+  generateCodeVisible.value = true;
 }
 
 const handleExportDoc = () => {
@@ -521,13 +631,61 @@ const handleExportDoc = () => {
 }
 
 const restoreHistory = (item) => {
-  requestForm.method = item.method
-  requestForm.url = item.url
-  ElMessage.success('已恢复历史参数')
+  if (item.snapshot) {
+    Object.assign(requestForm, JSON.parse(JSON.stringify(item.snapshot)))
+    ElMessage.success('已恢复历史参数')
+  } else {
+    // 兼容旧数据
+    requestForm.method = item.method
+    requestForm.url = item.url.replace(currentBaseUrl.value, '')
+    ElMessage.success('已恢复部分历史参数')
+  }
+}
+
+const handleImportResponse = () => {
+  if (!responseInfo.value || !responseInfo.value.data) {
+    ElMessage.warning('暂无响应数据')
+    return
+  }
+  try {
+    const json = JSON.parse(responseInfo.value.data)
+    responseDefList.value = flattenJson(json)
+    activeReqTab.value = 'responseDef'
+    ElMessage.success('响应结构导入成功')
+  } catch (e) {
+    ElMessage.error('解析响应JSON失败')
+  }
+}
+
+const flattenJson = (obj, prefix = '') => {
+  let result = []
+  if (typeof obj !== 'object' || obj === null) return result
+
+  for (const key in obj) {
+    const value = obj[key]
+    let type = typeof value
+    if (value === null) type = 'null'
+    else if (Array.isArray(value)) type = 'Array'
+
+    const fullKey = prefix ? `${prefix}.${key}` : key
+
+    result.push({
+      key: fullKey,
+      type: type.charAt(0).toUpperCase() + type.slice(1),
+      desc: ''
+    })
+
+    if (type === 'object' && value !== null) {
+      result = result.concat(flattenJson(value, fullKey))
+    } else if (type === 'Array' && value.length > 0 && typeof value[0] === 'object') {
+      result = result.concat(flattenJson(value[0], fullKey + '[0]'))
+    }
+  }
+  return result
 }
 
 // 新建逻辑
-const handleCreate = () => {
+const handleCreate = (parentNode = null) => {
   createForm.type = 'group'
   createForm.label = ''
   createForm.method = 'GET'
@@ -551,7 +709,7 @@ const submitCreate = () => {
       }
 
       // 获取当前选中的节点，如果是分组则添加到该分组下，否则添加到根节点
-      const currentNode = treeRef.value.getCurrentNode()
+      const currentNode = parentNode || treeRef.value.getCurrentNode()
       if (currentNode && !currentNode.method) { // 选中了分组节点
         if (!currentNode.children) currentNode.children = []
         currentNode.children.push(newNode)
