@@ -12,7 +12,7 @@
       <div class="sidebar-search">
         <el-input v-model="filterText" placeholder="搜索接口 / URL..." prefix-icon="Search" clearable />
       </div>
-      <div class="api-tree-wrapper">
+      <div class="api-tree-wrapper" @click="handleWrapperClick">
         <el-tree ref="treeRef" :data="apiTreeData" :props="defaultProps" :expand-on-click-node="false"
           :filter-node-method="filterNode" node-key="id" default-expand-all highlight-current
           @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
@@ -114,7 +114,15 @@
                         </el-select>
                       </el-form-item>
                       <el-form-item label="Token" v-if="requestForm.authType === 'bearer'">
-                        <el-input v-model="requestForm.authToken" type="textarea" :rows="3" placeholder="请输入 Token" />
+                        <el-input v-model="requestForm.authToken" type="textarea" :rows="3"
+                          placeholder="请输入 Token 或变量 {{token}}" />
+                        <div
+                          style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 8px; line-height: 1.5;">
+                          <el-icon style="vertical-align: -2px; margin-right: 4px">
+                            <InfoFilled />
+                          </el-icon>
+                          <span>发送请求时，以此处填写的内容为准。若填写 <span v-pre>{{token}}</span>，则会自动替换为当前环境中的变量值。</span>
+                        </div>
                       </el-form-item>
                     </el-form>
                   </div>
@@ -396,6 +404,11 @@
             <el-input v-model="row.url" placeholder="http://..." />
           </template>
         </el-table-column>
+        <el-table-column prop="variables" label="变量 (JSON)">
+          <template #default="{ row }">
+            <el-input v-model="row.variables" placeholder='{"token": "..."}' />
+          </template>
+        </el-table-column>
         <el-table-column width="60" align="center">
           <template #header>
             <el-button link type="primary" icon="Plus" @click="addEnvRow"></el-button>
@@ -434,13 +447,11 @@
 </template>
 
 <script setup name="ApiManager">
-import { ref, reactive, computed, watch } from 'vue'
 import { Codemirror } from 'vue-codemirror'
 import { json } from '@codemirror/lang-json'
 import { Splitpanes, Pane } from "splitpanes"
 import "splitpanes/dist/splitpanes.css"
 import { javascript } from '@codemirror/lang-javascript'
-import { ElMessage, ElMessageBox } from 'element-plus'
 
 // --- 状态定义 ---
 const filterText = ref('')
@@ -514,14 +525,15 @@ const defaultProps = {
   label: 'label'
 }
 
-// 请求表单数据
-const requestForm = reactive({
+// --- 优化：提取默认表单数据工厂函数 ---
+const getDefaultRequestForm = () => ({
   method: 'GET',
   url: '',
   pathParams: [],
   params: [
     { active: true, key: '', value: '', desc: '' }
   ],
+  // 默认 Headers
   headers: [
     { active: true, key: 'Content-Type', value: 'application/json', desc: '' },
     { active: true, key: 'User-Agent', value: 'MesTools/1.0', desc: '' }
@@ -535,6 +547,9 @@ const requestForm = reactive({
   bodyJson: '{\n  \n}'
 })
 
+// 请求表单数据
+const requestForm = reactive(getDefaultRequestForm())
+
 // 环境配置初始化
 const initEnvs = () => {
   const saved = localStorage.getItem('api_tool_envs')
@@ -542,9 +557,9 @@ const initEnvs = () => {
     envList.value = JSON.parse(saved)
   } else {
     envList.value = [
-      { name: '测试环境', key: 'test', url: 'http://192.168.1.20' },
-      { name: '开发环境', key: 'dev', url: 'http://localhost:8080' },
-      { name: '正式环境', key: 'prod', url: 'https://api.mes.com' }
+      { name: '测试环境', key: 'test', url: 'http://192.168.1.20', variables: '{"token": "test_token"}' },
+      { name: '开发环境', key: 'dev', url: 'http://localhost:8080', variables: '{"token": "dev_token"}' },
+      { name: '正式环境', key: 'prod', url: 'https://api.mes.com', variables: '{"token": ""}' }
     ]
   }
 }
@@ -601,6 +616,13 @@ const getMethodType = (method) => {
   return map[method] || 'info'
 }
 
+// 监听 Auth Type 变化，自动填充默认变量
+watch(() => requestForm.authType, (val) => {
+  if (val === 'bearer' && !requestForm.authToken) {
+    requestForm.authToken = '{{token}}'
+  }
+})
+
 // 监听 Auth 变化，自动同步到 Headers
 watch(() => [requestForm.authType, requestForm.authToken], ([type, token]) => {
   const authHeaderKey = 'Authorization'
@@ -614,7 +636,14 @@ watch(() => [requestForm.authType, requestForm.authToken], ([type, token]) => {
       requestForm.headers.push({ active: true, key: authHeaderKey, value: tokenValue, desc: 'Auto generated' })
     }
   } else if (type === 'none') {
-    // 可选：如果切换回 none，是否要自动删除 Header？Postman 通常保留但禁用，这里简单处理暂不删除，由用户决定
+    // 优化：切换回 none 时，自动禁用或删除 Authorization Header
+    const existingIndex = requestForm.headers.findIndex(h => h.key === authHeaderKey)
+    if (existingIndex !== -1) {
+      // 策略1：直接删除
+      // requestForm.headers.splice(existingIndex, 1) 
+      // 策略2：设为不激活 (更符合 Postman 习惯)
+      requestForm.headers[existingIndex].active = false
+    }
   }
 })
 
@@ -645,7 +674,7 @@ const openEnvManager = () => {
 }
 
 const addEnvRow = () => {
-  envList.value.push({ name: '', key: '', url: '' })
+  envList.value.push({ name: '', key: '', url: '', variables: '{}' })
 }
 
 const removeEnvRow = (index) => {
@@ -655,6 +684,13 @@ const removeEnvRow = (index) => {
 const saveEnvConfig = () => {
   if (envList.value.some(e => !e.name || !e.key)) {
     ElMessage.warning('环境名称和Key不能为空')
+    return
+  }
+  // 校验 JSON 格式
+  try {
+    envList.value.forEach(e => e.variables && JSON.parse(e.variables))
+  } catch (e) {
+    ElMessage.warning('变量必须是有效的 JSON 格式')
     return
   }
   localStorage.setItem('api_tool_envs', JSON.stringify(envList.value))
@@ -667,36 +703,41 @@ const handleNodeClick = (data) => {
   if (data.method) {
     currentNodeId.value = data.id
 
-    // 1. 重置表单
-    requestForm.params = []
-    requestForm.headers = []
-    requestForm.pathParams = []
-    requestForm.formData = []
-    requestForm.bodyType = 'json'
-    requestForm.bodyJson = '{\n  \n}'
-    requestForm.authType = 'none'
-    requestForm.authToken = ''
+    // 1. 重置表单 (使用 Object.assign + 工厂函数，消除冗余代码)
+    Object.assign(requestForm, getDefaultRequestForm())
     responseDefList.value = []
 
-    // 2. 回显数据 (使用深拷贝防止直接修改源数据)
+    // 2. 回显数据 (使用 structuredClone 替代 JSON.parse/stringify)
     requestForm.url = data.url
     requestForm.method = data.method
 
-    if (data.params) requestForm.params = JSON.parse(JSON.stringify(data.params))
-    if (data.headers) requestForm.headers = JSON.parse(JSON.stringify(data.headers))
-    if (data.pathParams) requestForm.pathParams = JSON.parse(JSON.stringify(data.pathParams))
+    if (data.params) requestForm.params = structuredClone(data.params)
+    if (data.headers) requestForm.headers = structuredClone(data.headers)
+    if (data.pathParams) requestForm.pathParams = structuredClone(data.pathParams)
     if (data.bodyType) requestForm.bodyType = data.bodyType
     if (data.bodyJson) requestForm.bodyJson = data.bodyJson
-    if (data.formData) requestForm.formData = JSON.parse(JSON.stringify(data.formData))
+    if (data.formData) requestForm.formData = structuredClone(data.formData)
     if (data.authType) requestForm.authType = data.authType
     if (data.authToken) requestForm.authToken = data.authToken
-    if (data.responseDef) responseDefList.value = JSON.parse(JSON.stringify(data.responseDef))
+    if (data.responseDef) responseDefList.value = structuredClone(data.responseDef)
 
     // 如果是新接口没有默认Header，可以加一个默认的
     if (requestForm.headers.length === 0) {
       requestForm.headers.push({ active: true, key: 'Content-Type', value: 'application/json', desc: '' })
     }
   }
+}
+
+// 点击树形控件外部空白处，取消选中状态
+const handleWrapperClick = (e) => {
+  // 如果点击的是树节点内容区域（包括展开箭头、标签等），则不处理，交给 el-tree 自身逻辑
+  if (e.target.closest('.el-tree-node__content')) return
+
+  // 否则视为点击了空白处，清除选中状态
+  treeRef.value.setCurrentKey(null)
+  currentNodeId.value = null
+  // 重置右侧表单
+  Object.assign(requestForm, getDefaultRequestForm())
 }
 
 // 表格行操作
@@ -728,37 +769,142 @@ const formatJson = () => {
   }
 }
 
-// 发送请求 (模拟)
-const handleSend = () => {
+// 变量替换辅助函数
+const replaceVariables = (str, variables) => {
+  if (!str || typeof str !== 'string') return str
+  return str.replace(/\{\{(.+?)\}\}/g, (match, key) => {
+    return variables[key.trim()] || match
+  })
+}
+
+// 路径参数替换辅助函数
+const replacePathParams = (url, pathParams) => {
+  let newUrl = url
+  pathParams.forEach(p => {
+    if (p.key && p.value) {
+      newUrl = newUrl.replace(new RegExp(`\\{${p.key}\\}`, 'g'), p.value)
+    }
+  })
+  return newUrl
+}
+
+// 发送请求
+const handleSend = async () => {
   loading.value = true
-  const finalUrl = currentBaseUrl.value + requestForm.url
+
+  // 1. 获取当前环境的变量
+  let envVariables = {}
+  const currentEnvObj = envList.value.find(e => e.key === currentEnv.value)
+  if (currentEnvObj && currentEnvObj.variables) {
+    try {
+      envVariables = JSON.parse(currentEnvObj.variables)
+    } catch (e) {
+      console.error('环境变量解析失败', e)
+    }
+  }
+
+  // 2. 执行变量替换 (URL, Headers, AuthToken, Body)
+  // 注意：这里只替换用于发送的临时变量，不修改 requestForm 显示的值
+  const finalUrl = replaceVariables(currentBaseUrl.value + requestForm.url, envVariables)
+  const finalAuthToken = replaceVariables(requestForm.authToken, envVariables)
+  const finalUrlWithParams = replacePathParams(finalUrl, requestForm.pathParams)
+
+  // 组装最终 Headers (包含变量替换)
+  const finalHeaders = requestForm.headers.map(h => ({
+    ...h,
+    key: replaceVariables(h.key, envVariables),
+    value: replaceVariables(h.value, envVariables)
+  })).filter(h => h.active && h.key) // 过滤掉未激活的 Header
+
+  // 如果是 Bearer 模式，强制更新 Authorization Header
+  if (requestForm.authType === 'bearer' && finalAuthToken) {
+    const authHeader = finalHeaders.find(h => h.key === 'Authorization')
+    if (authHeader) authHeader.value = `Bearer ${finalAuthToken}`
+    else finalHeaders.push({ key: 'Authorization', value: `Bearer ${finalAuthToken}` })
+  }
+
+  // 组装 Headers 对象
+  const headersObj = {}
+  finalHeaders.forEach(h => headersObj[h.key] = h.value)
 
   // 创建请求快照 (深拷贝)
-  const snapshot = JSON.parse(JSON.stringify(requestForm))
+  const snapshot = structuredClone(JSON.parse(JSON.stringify(requestForm))) // 确保去除 Proxy
 
-  // TODO: 这里未来应该调用后端代理接口
-  // axios.post('/tool/api/proxy', { ...requestForm, targetUrl: finalUrl }).then(...)
+  // --- 真实请求逻辑 (建议) ---
+  // 注意：纯前端直接请求会遇到 CORS 跨域问题。
+  // 解决方案：通常需要配置 vite/webpack 的 proxy，或者后端提供一个转发接口。
 
-  setTimeout(() => {
-    loading.value = false
-    responseInfo.value = {
+  try {
+    const startTime = Date.now()
+
+    // 构造 Axios 配置
+    const config = {
+      method: requestForm.method,
+      url: finalUrlWithParams, // 如果配置了代理，这里可能需要处理 url，例如加上 '/api-proxy' 前缀
+      headers: headersObj,
+      params: {}, // URL 参数
+      data: null
+    }
+
+    // 处理 Query Params
+    requestForm.params.filter(p => p.active && p.key).forEach(p => {
+      config.params[p.key] = replaceVariables(p.value, envVariables)
+    })
+
+    // 处理 Body
+    if (['POST', 'PUT', 'DELETE'].includes(requestForm.method)) {
+      if (requestForm.bodyType === 'json') {
+        try {
+          config.data = JSON.parse(replaceVariables(requestForm.bodyJson, envVariables))
+        } catch (e) {
+          config.data = replaceVariables(requestForm.bodyJson, envVariables) // 发送原始字符串或报错
+        }
+      } else if (requestForm.bodyType === 'form') {
+        // 处理 FormData...
+      }
+    }
+
+    // 模拟发送 (替换为真实请求: const res = await axios(config))
+    // const res = await axios(config) 
+
+    // --- 模拟数据开始 ---
+    await new Promise(r => setTimeout(r, 800)) // 模拟网络延迟
+    const mockRes = {
       status: 200,
       statusText: 'OK',
-      time: 156,
-      size: '1.2KB',
-      data: JSON.stringify({ code: 200, msg: '操作成功', data: { id: 123, name: 'Test' } }, null, 2)
+      data: { code: 200, msg: '操作成功', data: { id: 123, token_used: finalAuthToken } },
+      headers: { 'content-type': 'application/json' }
+    }
+    // --- 模拟数据结束 ---
+
+    const endTime = Date.now()
+    const duration = endTime - startTime
+
+    loading.value = false
+    responseInfo.value = {
+      status: mockRes.status,
+      statusText: mockRes.statusText,
+      time: duration,
+      size: JSON.stringify(mockRes.data).length + ' B', // 简单估算
+      data: typeof mockRes.data === 'object' ? JSON.stringify(mockRes.data, null, 2) : mockRes.data
     }
     activeResTab.value = 'response'
+
     // 添加历史
     historyList.value.unshift({
       time: new Date().toLocaleString(),
       method: requestForm.method,
-      url: finalUrl,
-      status: 200,
-      duration: 156,
+      url: finalUrlWithParams,
+      status: mockRes.status,
+      duration: duration,
       snapshot: snapshot
     })
-  }, 800)
+  } catch (error) {
+    loading.value = false
+    console.error(error)
+    ElMessage.error(error.message || '请求失败')
+    // 也可以记录失败的历史
+  }
 }
 
 // cURL 导入逻辑
@@ -829,15 +975,15 @@ const handleSave = () => {
       if (node.id === currentNodeId.value) {
         node.url = requestForm.url
         node.method = requestForm.method
-        node.params = JSON.parse(JSON.stringify(requestForm.params))
-        node.headers = JSON.parse(JSON.stringify(requestForm.headers))
-        node.pathParams = JSON.parse(JSON.stringify(requestForm.pathParams))
+        node.params = structuredClone(requestForm.params)
+        node.headers = structuredClone(requestForm.headers)
+        node.pathParams = structuredClone(requestForm.pathParams)
         node.bodyType = requestForm.bodyType
         node.bodyJson = requestForm.bodyJson
-        node.formData = JSON.parse(JSON.stringify(requestForm.formData))
+        node.formData = structuredClone(requestForm.formData)
         node.authType = requestForm.authType
         node.authToken = requestForm.authToken
-        node.responseDef = JSON.parse(JSON.stringify(responseDefList.value))
+        node.responseDef = structuredClone(responseDefList.value)
         return true
       }
       if (node.children && node.children.length > 0) {
@@ -854,8 +1000,11 @@ const handleSave = () => {
 }
 
 const handleGenerateCode = () => {
-  const { method, url, params, headers, bodyType, bodyJson } = requestForm;
-  const finalUrl = currentBaseUrl.value + url;
+  const { method, url, params, headers, bodyType, bodyJson, pathParams } = requestForm;
+  let finalUrl = currentBaseUrl.value + url;
+
+  // 替换 Path Params
+  finalUrl = replacePathParams(finalUrl, pathParams);
 
   let code = `import axios from 'axios';\n\n`;
 
@@ -903,7 +1052,7 @@ const handleExportDoc = () => {
 
 const restoreHistory = (item) => {
   if (item.snapshot) {
-    Object.assign(requestForm, JSON.parse(JSON.stringify(item.snapshot)))
+    Object.assign(requestForm, structuredClone(item.snapshot))
     ElMessage.success('已恢复历史参数')
   } else {
     // 兼容旧数据
@@ -955,6 +1104,28 @@ const flattenJson = (obj, prefix = '') => {
   return result
 }
 
+// --- 优化：统一删除逻辑 (供顶部按钮和右键菜单共用) ---
+const execDeleteNode = (node) => {
+  const data = node.data
+  ElMessageBox.confirm(`确定要删除 "${data.label}" 吗?`, '警告', {
+    confirmButtonText: '确定删除',
+    cancelButtonText: '取消',
+    type: 'warning',
+  }).then(() => {
+    const parent = node.parent
+    const children = parent.data.children || parent.data
+    const index = children.findIndex(d => d.id === data.id)
+    children.splice(index, 1)
+
+    // 如果删除的是当前选中的节点，清空选中状态并重置表单
+    if (currentNodeId.value === data.id) {
+      currentNodeId.value = null
+      Object.assign(requestForm, getDefaultRequestForm())
+    }
+    ElMessage.success('删除成功')
+  }).catch(() => { })
+}
+
 // 右键菜单处理
 const handleNodeContextMenu = (event, data, node, component) => {
   contextMenu.node = node
@@ -988,17 +1159,7 @@ const handleContextMenu = (action) => {
       }).catch(() => { })
       break
     case 'delete':
-      ElMessageBox.confirm(`确定要删除 "${node.label}" 吗?`, '警告', {
-        confirmButtonText: '确定删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }).then(() => {
-        const parent = node.parent
-        const children = parent.data.children || parent.data
-        const index = children.findIndex(d => d.id === node.data.id)
-        children.splice(index, 1)
-        ElMessage.success('删除成功')
-      }).catch(() => { })
+      execDeleteNode(node)
       break
   }
 }
@@ -1010,18 +1171,7 @@ const handleDeleteNode = () => {
     return
   }
   const node = treeRef.value.getNode(currentNode)
-
-  ElMessageBox.confirm(`确定要删除 "${currentNode.label}" 吗?`, '警告', {
-    confirmButtonText: '确定删除',
-    cancelButtonText: '取消',
-    type: 'warning',
-  }).then(() => {
-    const parent = node.parent
-    const children = parent.data.children || parent.data
-    const index = children.findIndex(d => d.id === currentNode.id)
-    children.splice(index, 1)
-    ElMessage.success('删除成功')
-  }).catch(() => { })
+  execDeleteNode(node)
 }
 
 // 新建逻辑
@@ -1107,6 +1257,18 @@ const submitCreate = () => {
       color: var(--el-color-danger);
     }
   }
+}
+
+/* 遮罩层样式：确保点击菜单外部时能关闭菜单 */
+.context-menu-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2000;
+  /* 必须比菜单(2001)低，但比页面内容高 */
+  background: transparent;
 }
 
 .api-manager-container {
