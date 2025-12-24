@@ -1,10 +1,13 @@
 <template>
-  <div class="app-container api-manager-container">
+  <div class="api-manager-container">
     <!-- 左侧侧边栏：接口树 -->
     <div class="sidebar">
       <div class="sidebar-header">
         <span>接口列表</span>
-        <el-button type="primary" link icon="Plus" size="small" @click="handleCreate">新建</el-button>
+        <div>
+          <el-button type="primary" link icon="Plus" size="small" @click="handleCreate">新建</el-button>
+          <el-button type="danger" link icon="Delete" size="small" @click="handleDeleteNode">删除</el-button>
+        </div>
       </div>
       <div class="sidebar-search">
         <el-input v-model="filterText" placeholder="搜索接口 / URL..." prefix-icon="Search" clearable />
@@ -15,8 +18,8 @@
           @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
           <template #default="{ node, data }">
             <span class="custom-tree-node">
-              <span v-if="data.method" :class="['method-tag', `method-${data.method}`]">{{ data.method
-              }}</span>
+              <el-tag v-if="data.method" size="small" :type="getMethodType(data.method)" class="method-tag">{{
+                data.method }}</el-tag>
               <span v-else class="folder-icon"><el-icon>
                   <Folder />
                 </el-icon></span>
@@ -49,17 +52,18 @@
       <div class="top-bar">
         <el-row :gutter="10" align="middle">
           <!-- 环境选择 -->
-          <el-col :span="3">
-            <el-select v-model="currentEnv" placeholder="选择环境" style="width: 100%" clearable>
-              <el-option label="未设定 (自定义)" value="" />
-              <el-option label="测试环境" value="test" />
-              <el-option label="开发环境" value="dev" />
-              <el-option label="正式环境" value="prod" />
-            </el-select>
+          <el-col :span="4">
+            <div style="display: flex; gap: 5px;">
+              <el-select v-model="currentEnv" placeholder="选择环境" style="width: 100%" clearable>
+                <el-option label="未设定 (自定义)" value="" />
+                <el-option v-for="env in envList" :key="env.key" :label="env.name" :value="env.key" />
+              </el-select>
+              <el-button icon="Setting" circle @click="openEnvManager" title="环境管理" />
+            </div>
           </el-col>
 
           <!-- URL 输入区 -->
-          <el-col :span="13">
+          <el-col :span="12">
             <el-input v-model="requestForm.url" :placeholder="urlPlaceholder">
               <template #prepend>
                 <el-select v-model="requestForm.method" style="width: 100px">
@@ -76,7 +80,7 @@
           <el-col :span="8">
             <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
             <el-button type="success" plain icon="FolderChecked" @click="handleSave">保存</el-button>
-            <el-button type="info" plain icon="Download" @click="handleCurlImport">CURL导入</el-button>
+            <el-button type="info" plain icon="Download" @click="handleCurlImport">cURL导入</el-button>
             <el-dropdown style="margin-left: 12px">
               <el-button type="primary" plain>
                 更多操作<el-icon class="el-icon--right"><arrow-down /></el-icon>
@@ -99,8 +103,42 @@
           <pane :size="60">
             <div class="request-panel">
               <el-tabs v-model="activeReqTab" class="custom-tabs">
+                <el-tab-pane label="Auth" name="auth">
+                  <div class="panel-content">
+                    <div class="section-desc">Authorization (鉴权)</div>
+                    <el-form label-position="top" size="small">
+                      <el-form-item label="Type">
+                        <el-select v-model="requestForm.authType" style="width: 200px">
+                          <el-option label="No Auth" value="none" />
+                          <el-option label="Bearer Token" value="bearer" />
+                        </el-select>
+                      </el-form-item>
+                      <el-form-item label="Token" v-if="requestForm.authType === 'bearer'">
+                        <el-input v-model="requestForm.authToken" type="textarea" :rows="3" placeholder="请输入 Token" />
+                      </el-form-item>
+                    </el-form>
+                  </div>
+                </el-tab-pane>
                 <el-tab-pane label="Params" name="params">
                   <div class="panel-content">
+                    <!-- Path Variables 区域 -->
+                    <div v-if="requestForm.pathParams.length > 0">
+                      <div class="section-desc">Path Variables (路径参数)</div>
+                      <el-table :data="requestForm.pathParams" style="width: 100%; margin-bottom: 15px;" size="small"
+                        border>
+                        <el-table-column label="Key" width="200" prop="key" />
+                        <el-table-column label="Value" width="200">
+                          <template #default="scope">
+                            <el-input v-model="scope.row.value" placeholder="Value" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="Description">
+                          <template #default="scope">
+                            <el-input v-model="scope.row.desc" placeholder="描述" />
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                    </div>
                     <div class="section-desc">Query Params (URL 参数)</div>
                     <el-table :data="requestForm.params" style="width: 100%" size="small" border>
                       <el-table-column width="50" align="center">
@@ -185,6 +223,32 @@
                       <codemirror v-model="requestForm.bodyJson" placeholder="请输入 JSON..." :style="{ height: '100%' }"
                         :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="extensions" />
                     </div>
+                    <div v-else-if="requestForm.bodyType === 'form'" class="panel-content" style="padding-top: 0;">
+                      <el-table :data="requestForm.formData" style="width: 100%" size="small" border>
+                        <el-table-column width="50" align="center">
+                          <template #default="scope">
+                            <el-checkbox v-model="scope.row.active" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="Key" width="200">
+                          <template #default="scope">
+                            <el-input v-model="scope.row.key" placeholder="Key" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="Value">
+                          <template #default="scope">
+                            <el-input v-model="scope.row.value" placeholder="Value" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column width="50" align="center">
+                          <template #default="scope">
+                            <el-button link type="danger" icon="Delete"
+                              @click="removeRow(requestForm.formData, scope.$index)" />
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                      <el-button link type="primary" icon="Plus" @click="addRow(requestForm.formData)">添加参数</el-button>
+                    </div>
                     <div v-else-if="requestForm.bodyType === 'none'" class="empty-tip">
                       该请求没有 Body 数据
                     </div>
@@ -233,10 +297,18 @@
                       <span class="meta-item">大小: {{ responseInfo.size }}</span>
                       <el-button type="primary" link size="small" style="margin-left: auto;"
                         @click="handleImportResponse">导入为响应结构</el-button>
+                      <el-divider direction="vertical" />
+                      <el-radio-group v-model="responseViewMode" size="small">
+                        <el-radio-button label="pretty">Pretty</el-radio-button>
+                        <el-radio-button label="preview">Preview</el-radio-button>
+                      </el-radio-group>
                     </div>
-                    <div class="editor-wrapper" v-if="responseInfo">
+                    <div class="editor-wrapper" v-if="responseInfo && responseViewMode === 'pretty'">
                       <codemirror v-model="responseInfo.data" :style="{ height: '100%' }" :extensions="extensions"
                         :disabled="true" />
+                    </div>
+                    <div class="editor-wrapper" v-else-if="responseInfo && responseViewMode === 'preview'">
+                      <iframe :srcdoc="responseInfo.data" style="width: 100%; height: 100%; border: none;"></iframe>
                     </div>
                     <el-empty v-else description="点击发送查看响应" :image-size="80" />
                   </div>
@@ -306,6 +378,41 @@
       </template>
     </el-dialog>
 
+    <!-- 环境管理弹窗 -->
+    <el-dialog v-model="envDialogVisible" title="环境管理" width="600px">
+      <el-table :data="envList" border stripe>
+        <el-table-column prop="name" label="环境名称">
+          <template #default="{ row }">
+            <el-input v-model="row.name" placeholder="如: 测试环境" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="key" label="Key (唯一)">
+          <template #default="{ row }">
+            <el-input v-model="row.key" placeholder="如: test" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="url" label="Base URL">
+          <template #default="{ row }">
+            <el-input v-model="row.url" placeholder="http://..." />
+          </template>
+        </el-table-column>
+        <el-table-column width="60" align="center">
+          <template #header>
+            <el-button link type="primary" icon="Plus" @click="addEnvRow"></el-button>
+          </template>
+          <template #default="{ $index }">
+            <el-button link type="danger" icon="Delete" @click="removeEnvRow($index)"></el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="envDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="saveEnvConfig">保存</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
     <!-- 生成代码弹窗 -->
     <el-dialog v-model="generateCodeVisible" title="生成代码" width="700px">
       <div class="code-generator-dialog">
@@ -313,10 +420,15 @@
           <el-tab-pane label="Axios" name="axios"></el-tab-pane>
           <el-tab-pane label="Fetch" name="fetch" disabled></el-tab-pane>
         </el-tabs>
-        <el-button type="primary" link icon="CopyDocument" class="copy-btn" @click="copyGeneratedCode">复制</el-button>
         <codemirror v-model="generatedCode" :style="{ height: '400px' }" :autofocus="true" :indent-with-tab="true"
           :tab-size="2" :extensions="codeGenExtensions" :disabled="true" />
       </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="generateCodeVisible = false">关 闭</el-button>
+          <el-button type="primary" icon="CopyDocument" @click="copyGeneratedCode">复制代码</el-button>
+        </span>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -328,15 +440,18 @@ import { json } from '@codemirror/lang-json'
 import { Splitpanes, Pane } from "splitpanes"
 import "splitpanes/dist/splitpanes.css"
 import { javascript } from '@codemirror/lang-javascript'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 // --- 状态定义 ---
 const filterText = ref('')
 const treeRef = ref(null)
 const currentEnv = ref('')
 const loading = ref(false)
-const activeReqTab = ref('params')
+const envDialogVisible = ref(false)
+const envList = ref([])
+const activeReqTab = ref('auth')
 const activeResTab = ref('response')
+const responseViewMode = ref('pretty')
 const curlDialogVisible = ref(false)
 const curlInput = ref('')
 const createDialogVisible = ref(false)
@@ -351,6 +466,8 @@ const contextMenu = reactive({
   node: null
 })
 const responseDefList = ref([])
+const currentNodeId = ref(null) // 记录当前选中的节点ID
+const createParentNode = ref(null) // 用于存储新建时的父节点
 
 // Codemirror 扩展
 const extensions = [json()]
@@ -366,7 +483,11 @@ const apiTreeData = ref([
         id: 11,
         label: 'System 模块',
         children: [
-          { id: 111, label: '新增用户', method: 'POST', url: '/system/user' },
+          {
+            id: 111, label: '新增用户', method: 'POST', url: '/system/user',
+            params: [], headers: [{ active: true, key: 'Content-Type', value: 'application/json', desc: '' }],
+            bodyType: 'json', bodyJson: '{\n  "userName": "admin"\n}'
+          },
           { id: 112, label: '查询用户列表', method: 'GET', url: '/system/user/list' }
         ]
       },
@@ -397,26 +518,43 @@ const defaultProps = {
 const requestForm = reactive({
   method: 'GET',
   url: '',
+  pathParams: [],
   params: [
-    { active: true, key: 'pageNum', value: '1', desc: '页码' },
-    { active: true, key: 'pageSize', value: '10', desc: '每页条数' }
+    { active: true, key: '', value: '', desc: '' }
   ],
   headers: [
     { active: true, key: 'Content-Type', value: 'application/json', desc: '' },
-    { active: true, key: 'Authorization', value: '', desc: 'Token' }
+    { active: true, key: 'User-Agent', value: 'MesTools/1.0', desc: '' }
+  ],
+  authType: 'none',
+  authToken: '',
+  formData: [
+    { active: true, key: '', value: '', desc: '' }
   ],
   bodyType: 'json',
   bodyJson: '{\n  \n}'
 })
 
-// 环境配置
-const envMap = {
-  test: 'http://192.168.1.20',
-  dev: 'http://localhost:8080',
-  prod: 'https://api.mes.com'
+// 环境配置初始化
+const initEnvs = () => {
+  const saved = localStorage.getItem('api_tool_envs')
+  if (saved) {
+    envList.value = JSON.parse(saved)
+  } else {
+    envList.value = [
+      { name: '测试环境', key: 'test', url: 'http://192.168.1.20' },
+      { name: '开发环境', key: 'dev', url: 'http://localhost:8080' },
+      { name: '正式环境', key: 'prod', url: 'https://api.mes.com' }
+    ]
+  }
 }
+initEnvs()
 
-const currentBaseUrl = computed(() => envMap[currentEnv.value] || '')
+const currentBaseUrl = computed(() => {
+  const env = envList.value.find(e => e.key === currentEnv.value)
+  return env ? env.url : ''
+})
+
 const urlPlaceholder = computed(() => {
   return currentEnv.value ? '请输入接口路径 (如 /system/user)' : '请输入完整接口地址 (如 http://localhost/api...)'
 })
@@ -425,10 +563,7 @@ const urlPlaceholder = computed(() => {
 const responseInfo = ref(null)
 
 // 历史记录
-const historyList = ref([
-  { time: '2023-10-27 10:00:00', method: 'POST', url: '/system/user', status: 200, duration: 120 },
-  { time: '2023-10-27 09:55:00', method: 'GET', url: '/system/user/list', status: 500, duration: 45 }
-])
+const historyList = ref([])
 
 // 新建表单数据
 const createForm = reactive({
@@ -455,11 +590,112 @@ const filterNode = (value, data) => {
   return data.label.includes(value) || (data.url && data.url.includes(value))
 }
 
+// 获取请求方法对应的 Tag 类型
+const getMethodType = (method) => {
+  const map = {
+    GET: 'success',
+    POST: 'warning',
+    PUT: 'primary',
+    DELETE: 'danger'
+  }
+  return map[method] || 'info'
+}
+
+// 监听 Auth 变化，自动同步到 Headers
+watch(() => [requestForm.authType, requestForm.authToken], ([type, token]) => {
+  const authHeaderKey = 'Authorization'
+  if (type === 'bearer' && token) {
+    const tokenValue = `Bearer ${token}`
+    const existing = requestForm.headers.find(h => h.key === authHeaderKey)
+    if (existing) {
+      existing.value = tokenValue
+      existing.active = true
+    } else {
+      requestForm.headers.push({ active: true, key: authHeaderKey, value: tokenValue, desc: 'Auto generated' })
+    }
+  } else if (type === 'none') {
+    // 可选：如果切换回 none，是否要自动删除 Header？Postman 通常保留但禁用，这里简单处理暂不删除，由用户决定
+  }
+})
+
+// 监听 URL 变化，自动提取 Path Variables
+watch(() => requestForm.url, (newUrl) => {
+  if (!newUrl) {
+    requestForm.pathParams = []
+    return
+  }
+  // 匹配 {xxx} 格式
+  const matches = newUrl.match(/\{([a-zA-Z0-9_]+)\}/g)
+  if (matches) {
+    const keys = matches.map(m => m.slice(1, -1))
+    // 保留已有的值，移除不存在的，添加新的
+    const newParams = keys.map(key => {
+      const existing = requestForm.pathParams.find(p => p.key === key)
+      return existing || { key, value: '', desc: '' }
+    })
+    requestForm.pathParams = newParams
+  } else {
+    requestForm.pathParams = []
+  }
+})
+
+// 环境管理方法
+const openEnvManager = () => {
+  envDialogVisible.value = true
+}
+
+const addEnvRow = () => {
+  envList.value.push({ name: '', key: '', url: '' })
+}
+
+const removeEnvRow = (index) => {
+  envList.value.splice(index, 1)
+}
+
+const saveEnvConfig = () => {
+  if (envList.value.some(e => !e.name || !e.key)) {
+    ElMessage.warning('环境名称和Key不能为空')
+    return
+  }
+  localStorage.setItem('api_tool_envs', JSON.stringify(envList.value))
+  envDialogVisible.value = false
+  ElMessage.success('环境配置已保存')
+}
+
 const handleNodeClick = (data) => {
-  if (data.url) {
+  // 只有点击具体的接口节点（有method属性）才加载数据
+  if (data.method) {
+    currentNodeId.value = data.id
+
+    // 1. 重置表单
+    requestForm.params = []
+    requestForm.headers = []
+    requestForm.pathParams = []
+    requestForm.formData = []
+    requestForm.bodyType = 'json'
+    requestForm.bodyJson = '{\n  \n}'
+    requestForm.authType = 'none'
+    requestForm.authToken = ''
+    responseDefList.value = []
+
+    // 2. 回显数据 (使用深拷贝防止直接修改源数据)
     requestForm.url = data.url
-    requestForm.method = data.method || 'GET'
-    // 这里可以根据接口ID加载详细参数
+    requestForm.method = data.method
+
+    if (data.params) requestForm.params = JSON.parse(JSON.stringify(data.params))
+    if (data.headers) requestForm.headers = JSON.parse(JSON.stringify(data.headers))
+    if (data.pathParams) requestForm.pathParams = JSON.parse(JSON.stringify(data.pathParams))
+    if (data.bodyType) requestForm.bodyType = data.bodyType
+    if (data.bodyJson) requestForm.bodyJson = data.bodyJson
+    if (data.formData) requestForm.formData = JSON.parse(JSON.stringify(data.formData))
+    if (data.authType) requestForm.authType = data.authType
+    if (data.authToken) requestForm.authToken = data.authToken
+    if (data.responseDef) responseDefList.value = JSON.parse(JSON.stringify(data.responseDef))
+
+    // 如果是新接口没有默认Header，可以加一个默认的
+    if (requestForm.headers.length === 0) {
+      requestForm.headers.push({ active: true, key: 'Content-Type', value: 'application/json', desc: '' })
+    }
   }
 }
 
@@ -499,6 +735,9 @@ const handleSend = () => {
 
   // 创建请求快照 (深拷贝)
   const snapshot = JSON.parse(JSON.stringify(requestForm))
+
+  // TODO: 这里未来应该调用后端代理接口
+  // axios.post('/tool/api/proxy', { ...requestForm, targetUrl: finalUrl }).then(...)
 
   setTimeout(() => {
     loading.value = false
@@ -579,7 +818,39 @@ const parseCurl = () => {
 }
 
 const handleSave = () => {
-  ElMessage.success('接口信息已保存')
+  if (!currentNodeId.value) {
+    ElMessage.warning('请先选择一个接口节点')
+    return
+  }
+
+  // 递归查找并更新树节点数据
+  const updateNode = (nodes) => {
+    for (const node of nodes) {
+      if (node.id === currentNodeId.value) {
+        node.url = requestForm.url
+        node.method = requestForm.method
+        node.params = JSON.parse(JSON.stringify(requestForm.params))
+        node.headers = JSON.parse(JSON.stringify(requestForm.headers))
+        node.pathParams = JSON.parse(JSON.stringify(requestForm.pathParams))
+        node.bodyType = requestForm.bodyType
+        node.bodyJson = requestForm.bodyJson
+        node.formData = JSON.parse(JSON.stringify(requestForm.formData))
+        node.authType = requestForm.authType
+        node.authToken = requestForm.authToken
+        node.responseDef = JSON.parse(JSON.stringify(responseDefList.value))
+        return true
+      }
+      if (node.children && node.children.length > 0) {
+        if (updateNode(node.children)) return true
+      }
+    }
+    return false
+  }
+
+  if (updateNode(apiTreeData.value)) {
+    ElMessage.success('接口信息已保存 (本地暂存)')
+    // TODO: 这里未来调用后端保存接口 API
+  }
 }
 
 const handleGenerateCode = () => {
@@ -684,6 +955,75 @@ const flattenJson = (obj, prefix = '') => {
   return result
 }
 
+// 右键菜单处理
+const handleNodeContextMenu = (event, data, node, component) => {
+  contextMenu.node = node
+  contextMenu.visible = true
+  contextMenu.left = event.clientX
+  contextMenu.top = event.clientY
+}
+
+const handleContextMenu = (action) => {
+  const node = contextMenu.node
+  contextMenu.visible = false
+  if (!node) return
+
+  switch (action) {
+    case 'addChild':
+      // 只有分组可以添加子节点
+      if (node.data.method) {
+        ElMessage.warning('接口节点下不能再添加子节点')
+        return
+      }
+      handleCreate(node)
+      break
+    case 'rename':
+      ElMessageBox.prompt('请输入新的名称', '重命名', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputValue: node.label,
+      }).then(({ value }) => {
+        node.data.label = value
+        ElMessage.success('重命名成功')
+      }).catch(() => { })
+      break
+    case 'delete':
+      ElMessageBox.confirm(`确定要删除 "${node.label}" 吗?`, '警告', {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }).then(() => {
+        const parent = node.parent
+        const children = parent.data.children || parent.data
+        const index = children.findIndex(d => d.id === node.data.id)
+        children.splice(index, 1)
+        ElMessage.success('删除成功')
+      }).catch(() => { })
+      break
+  }
+}
+
+const handleDeleteNode = () => {
+  const currentNode = treeRef.value.getCurrentNode()
+  if (!currentNode) {
+    ElMessage.warning('请先选择要删除的节点')
+    return
+  }
+  const node = treeRef.value.getNode(currentNode)
+
+  ElMessageBox.confirm(`确定要删除 "${currentNode.label}" 吗?`, '警告', {
+    confirmButtonText: '确定删除',
+    cancelButtonText: '取消',
+    type: 'warning',
+  }).then(() => {
+    const parent = node.parent
+    const children = parent.data.children || parent.data
+    const index = children.findIndex(d => d.id === currentNode.id)
+    children.splice(index, 1)
+    ElMessage.success('删除成功')
+  }).catch(() => { })
+}
+
 // 新建逻辑
 const handleCreate = (parentNode = null) => {
   createForm.type = 'group'
@@ -691,6 +1031,13 @@ const handleCreate = (parentNode = null) => {
   createForm.method = 'GET'
   createForm.url = ''
   createDialogVisible.value = true
+
+  // 如果是从右键菜单“新增子节点”进来，parentNode 是 Node 对象
+  if (parentNode && parentNode.data) {
+    createParentNode.value = parentNode
+  } else {
+    createParentNode.value = null
+  }
 }
 
 const submitCreate = () => {
@@ -709,7 +1056,13 @@ const submitCreate = () => {
       }
 
       // 获取当前选中的节点，如果是分组则添加到该分组下，否则添加到根节点
-      const currentNode = parentNode || treeRef.value.getCurrentNode()
+      let currentNode = null
+      if (createParentNode.value) {
+        currentNode = createParentNode.value.data
+      } else {
+        currentNode = treeRef.value.getCurrentNode()
+      }
+
       if (currentNode && !currentNode.method) { // 选中了分组节点
         if (!currentNode.children) currentNode.children = []
         currentNode.children.push(newNode)
@@ -725,22 +1078,51 @@ const submitCreate = () => {
 </script>
 
 <style scoped lang="scss">
+/* 右键菜单样式优化 */
+.context-menu {
+  position: fixed;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 4px;
+  box-shadow: var(--el-box-shadow-light);
+  z-index: 2001;
+  padding: 5px 0;
+
+  .menu-item {
+    padding: 8px 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    color: var(--el-text-color-regular);
+
+    .el-icon {
+      margin-right: 8px;
+    }
+
+    &:hover {
+      background-color: var(--el-fill-color-light);
+    }
+
+    &.danger {
+      color: var(--el-color-danger);
+    }
+  }
+}
+
 .api-manager-container {
   height: calc(100vh - 84px);
   /* 减去 navbar 和 tagsview 的高度 */
   display: flex;
-  padding: 0 !important;
-  /* 覆盖 app-container 默认 padding */
   overflow: hidden;
-  background-color: #fff;
-  color: #303133;
+  background-color: var(--el-bg-color);
+  color: var(--el-text-color-primary);
 }
 
 /* 左侧侧边栏 */
 .sidebar {
   width: 280px;
-  background-color: #fff;
-  border-right: 1px solid #dcdfe6;
+  background-color: var(--el-bg-color);
+  border-right: 1px solid var(--el-border-color);
   display: flex;
   flex-direction: column;
 
@@ -749,22 +1131,22 @@ const submitCreate = () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid #dcdfe6;
+    border-bottom: 1px solid var(--el-border-color);
     font-weight: bold;
-    color: #303133;
+    color: var(--el-text-color-primary);
   }
 
   .sidebar-search {
     padding: 10px;
-    border-bottom: 1px solid #dcdfe6;
+    border-bottom: 1px solid var(--el-border-color);
 
     :deep(.el-input__wrapper) {
-      background-color: #fff;
       box-shadow: none;
+      background-color: transparent;
     }
 
     :deep(.el-input__inner) {
-      color: #606266;
+      color: var(--el-text-color-regular);
     }
   }
 
@@ -775,15 +1157,15 @@ const submitCreate = () => {
 
     :deep(.el-tree) {
       background: transparent;
-      color: #606266;
+      color: var(--el-text-color-regular);
     }
 
     :deep(.el-tree-node__content:hover) {
-      background-color: #f5f7fa;
+      background-color: var(--el-fill-color-light);
     }
 
     :deep(.el-tree-node:focus > .el-tree-node__content) {
-      background-color: #f5f7fa;
+      background-color: var(--el-fill-color-light);
     }
   }
 }
@@ -796,38 +1178,16 @@ const submitCreate = () => {
   overflow: hidden;
 
   .method-tag {
-    font-size: 10px;
-    padding: 1px 4px;
-    border-radius: 3px;
     margin-right: 6px;
-    width: 36px;
+    width: 45px;
     text-align: center;
     font-weight: bold;
-
-    &.method-GET {
-      color: #52c41a;
-      background: rgba(82, 196, 26, 0.1);
-    }
-
-    &.method-POST {
-      color: #faad14;
-      background: rgba(250, 173, 20, 0.1);
-    }
-
-    &.method-PUT {
-      color: #1890ff;
-      background: rgba(24, 144, 255, 0.1);
-    }
-
-    &.method-DELETE {
-      color: #ff4d4f;
-      background: rgba(255, 77, 79, 0.1);
-    }
+    justify-content: center;
   }
 
   .folder-icon {
     margin-right: 6px;
-    color: #888;
+    color: var(--el-text-color-secondary);
   }
 
   .node-label {
@@ -842,12 +1202,12 @@ const submitCreate = () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background-color: #fff;
+  background-color: var(--el-bg-color);
 
   .top-bar {
     padding: 10px 15px;
-    background-color: #fff;
-    border-bottom: 1px solid #dcdfe6;
+    background-color: var(--el-bg-color);
+    border-bottom: 1px solid var(--el-border-color);
   }
 
   .workspace {
@@ -858,14 +1218,14 @@ const submitCreate = () => {
       height: 100%;
       display: flex;
       flex-direction: column;
-      border-right: 1px solid #dcdfe6;
+      border-right: 1px solid var(--el-border-color);
     }
 
     .response-panel {
       height: 100%;
       display: flex;
       flex-direction: column;
-      background-color: #fff;
+      background-color: var(--el-bg-color);
     }
   }
 }
@@ -879,7 +1239,7 @@ const submitCreate = () => {
   flex-direction: column;
 
   .section-desc {
-    color: #888;
+    color: var(--el-text-color-secondary);
     font-size: 12px;
     margin-bottom: 8px;
   }
@@ -890,7 +1250,7 @@ const submitCreate = () => {
 
   .body-toolbar {
     padding: 5px 10px;
-    border-bottom: 1px solid #dcdfe6;
+    border-bottom: 1px solid var(--el-border-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -904,7 +1264,7 @@ const submitCreate = () => {
   .empty-tip {
     padding: 20px;
     text-align: center;
-    color: #666;
+    color: var(--el-text-color-secondary);
   }
 }
 
@@ -913,14 +1273,14 @@ const submitCreate = () => {
 
   .response-meta {
     padding: 5px 10px;
-    border-bottom: 1px solid #dcdfe6;
+    border-bottom: 1px solid var(--el-border-color);
     font-size: 12px;
     display: flex;
     align-items: center;
     gap: 10px;
 
     .meta-item {
-      color: #888;
+      color: var(--el-text-color-secondary);
     }
   }
 
@@ -931,9 +1291,9 @@ const submitCreate = () => {
 }
 
 .history-card {
-  background-color: #fff;
-  border: 1px solid #e4e7ed;
-  color: #303133;
+  background-color: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-light);
+  color: var(--el-text-color-primary);
   cursor: pointer;
   margin-bottom: 5px;
 
@@ -944,13 +1304,13 @@ const submitCreate = () => {
   h4 {
     margin: 0 0 5px 0;
     font-size: 13px;
-    color: #303133;
+    color: var(--el-text-color-primary);
   }
 
   p {
     margin: 0;
     font-size: 12px;
-    color: #909399;
+    color: var(--el-text-color-secondary);
   }
 
   &:hover {
@@ -966,8 +1326,8 @@ const submitCreate = () => {
 
   .el-tabs__header {
     margin: 0;
-    background-color: #f5f7fa;
-    border-bottom: 1px solid #e4e7ed;
+    background-color: var(--el-fill-color-light);
+    border-bottom: 1px solid var(--el-border-color);
     padding: 0 15px;
   }
 
@@ -976,13 +1336,13 @@ const submitCreate = () => {
   }
 
   .el-tabs__item {
-    color: #909399;
+    color: var(--el-text-color-secondary);
     height: 36px;
     line-height: 36px;
 
     &.is-active {
       color: var(--el-color-primary);
-      background-color: #fff;
+      background-color: var(--el-bg-color);
     }
   }
 
@@ -996,28 +1356,12 @@ const submitCreate = () => {
   }
 }
 
-/* 表格暗色适配 */
+/* 表格样式微调，移除强制背景色，使用 Element Plus 变量 */
 :deep(.el-table) {
-  --el-table-bg-color: #fff;
-  --el-table-tr-bg-color: #fff;
-  --el-table-header-bg-color: #f8f8f9;
-  --el-table-border-color: #ebeef5;
-  --el-table-text-color: #606266;
-  --el-table-header-text-color: #515a6e;
-  background-color: #fff;
-
-  th.el-table__cell {
-    background-color: #f8f8f9;
-  }
-
   .el-input__wrapper {
-    background-color: #fff;
     box-shadow: none;
     padding: 0;
-  }
-
-  .el-input__inner {
-    color: #606266;
+    background-color: transparent;
   }
 }
 </style>
