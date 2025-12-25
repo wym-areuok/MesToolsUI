@@ -14,16 +14,16 @@
       </div>
       <div class="api-tree-wrapper" @click="handleWrapperClick">
         <el-tree ref="treeRef" :data="apiTreeData" :props="defaultProps" :expand-on-click-node="false"
-          :filter-node-method="filterNode" node-key="id" default-expand-all highlight-current
+          :filter-node-method="filterNode" node-key="itemId" default-expand-all highlight-current
           @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
           <template #default="{ node, data }">
             <span class="custom-tree-node">
-              <el-tag v-if="data.method" size="small" :type="getMethodType(data.method)" class="method-tag">{{
-                data.method }}</el-tag>
+              <el-tag v-if="data.reqMethod" size="small" :type="getMethodType(data.reqMethod)" class="method-tag">{{
+                data.reqMethod }}</el-tag>
               <span v-else class="folder-icon"><el-icon>
                   <Folder />
                 </el-icon></span>
-              <span class="node-label" :title="data.label">{{ node.label }}</span>
+              <span class="node-label" :title="data.itemName">{{ node.label }}</span>
             </span>
           </template>
         </el-tree>
@@ -54,9 +54,9 @@
           <!-- 环境选择 -->
           <el-col :span="4">
             <div style="display: flex; gap: 5px;">
-              <el-select v-model="currentEnv" placeholder="选择环境" style="width: 100%" clearable>
+              <el-select v-model="currentEnvKey" placeholder="选择环境" style="width: 100%" clearable>
                 <el-option label="未设定 (自定义)" value="" />
-                <el-option v-for="env in envList" :key="env.key" :label="env.name" :value="env.key" />
+                <el-option v-for="env in envList" :key="env.envKey" :label="env.envName" :value="env.envKey" />
               </el-select>
               <el-button icon="Setting" circle @click="openEnvManager" title="环境管理" />
             </div>
@@ -325,10 +325,11 @@
                   <div class="panel-content">
                     <el-timeline style="padding: 10px;">
                       <el-timeline-item v-for="(item, index) in historyList" :key="index"
-                        :type="item.status === 200 ? 'success' : 'danger'" :timestamp="item.time" placement="top">
+                        :type="item.resStatus === 200 ? 'success' : 'danger'" :timestamp="item.createTime"
+                        placement="top">
                         <el-card class="history-card" shadow="hover" @click="restoreHistory(item)">
-                          <h4>{{ item.method }} {{ item.url }}</h4>
-                          <p>状态: {{ item.status }} | 耗时: {{ item.duration }}ms</p>
+                          <h4>{{ item.reqMethod }} {{ item.reqUrl }}</h4>
+                          <p>状态: {{ item.resStatus }} | 耗时: {{ item.duration }}ms</p>
                         </el-card>
                       </el-timeline-item>
                     </el-timeline>
@@ -356,25 +357,25 @@
     <el-dialog v-model="createDialogVisible" title="新建" width="500px">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
         <el-form-item label="类型" prop="type">
-          <el-radio-group v-model="createForm.type">
+          <el-radio-group v-model="createForm.itemType">
             <el-radio label="group">分组/模块</el-radio>
             <el-radio label="api">接口</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="名称" prop="label">
-          <el-input v-model="createForm.label" placeholder="请输入名称" />
+        <el-form-item label="名称" prop="itemName">
+          <el-input v-model="createForm.itemName" placeholder="请输入名称" />
         </el-form-item>
-        <template v-if="createForm.type === 'api'">
-          <el-form-item label="请求方式" prop="method">
-            <el-select v-model="createForm.method" placeholder="请选择">
+        <template v-if="createForm.itemType === 'api'">
+          <el-form-item label="请求方式" prop="reqMethod">
+            <el-select v-model="createForm.reqMethod" placeholder="请选择">
               <el-option label="GET" value="GET" />
               <el-option label="POST" value="POST" />
               <el-option label="PUT" value="PUT" />
               <el-option label="DELETE" value="DELETE" />
             </el-select>
           </el-form-item>
-          <el-form-item label="接口地址" prop="url">
-            <el-input v-model="createForm.url" placeholder="/path/to/api" />
+          <el-form-item label="接口地址" prop="reqUrl">
+            <el-input v-model="createForm.reqUrl" placeholder="/path/to/api" />
           </el-form-item>
         </template>
       </el-form>
@@ -389,24 +390,24 @@
     <!-- 环境管理弹窗 -->
     <el-dialog v-model="envDialogVisible" title="环境管理" width="600px">
       <el-table :data="envList" border stripe>
-        <el-table-column prop="name" label="环境名称">
+        <el-table-column prop="envName" label="环境名称">
           <template #default="{ row }">
-            <el-input v-model="row.name" placeholder="如: 测试环境" />
+            <el-input v-model="row.envName" placeholder="如: 测试环境" />
           </template>
         </el-table-column>
-        <el-table-column prop="key" label="Key (唯一)">
+        <el-table-column prop="envKey" label="Key (唯一)">
           <template #default="{ row }">
-            <el-input v-model="row.key" placeholder="如: test" />
+            <el-input v-model="row.envKey" placeholder="如: test" />
           </template>
         </el-table-column>
-        <el-table-column prop="url" label="Base URL">
+        <el-table-column prop="baseUrl" label="Base URL">
           <template #default="{ row }">
-            <el-input v-model="row.url" placeholder="http://..." />
+            <el-input v-model="row.baseUrl" placeholder="http://..." />
           </template>
         </el-table-column>
-        <el-table-column prop="variables" label="变量 (JSON)">
+        <el-table-column prop="variablesJson" label="变量 (JSON)">
           <template #default="{ row }">
-            <el-input v-model="row.variables" placeholder='{"token": "..."}' />
+            <el-input v-model="row.variablesJson" placeholder='{"token": "..."}' />
           </template>
         </el-table-column>
         <el-table-column width="60" align="center">
@@ -452,11 +453,22 @@ import { json } from '@codemirror/lang-json'
 import { Splitpanes, Pane } from "splitpanes"
 import "splitpanes/dist/splitpanes.css"
 import { javascript } from '@codemirror/lang-javascript'
+import {
+  listApiTree,
+  getApi,
+  addApi,
+  updateApi,
+  delApi,
+  listEnv,
+  saveEnvList,
+  proxyRequest,
+  listHistory
+} from '@/api/dailyTools/apiManage'
 
 // --- 状态定义 ---
 const filterText = ref('')
 const treeRef = ref(null)
-const currentEnv = ref('')
+const currentEnvKey = ref('')
 const loading = ref(false)
 const envDialogVisible = ref(false)
 const envList = ref([])
@@ -485,44 +497,11 @@ const extensions = [json()]
 const codeGenExtensions = [javascript()]
 
 // 接口树数据 (模拟)
-const apiTreeData = ref([
-  {
-    id: 1,
-    label: 'MES 主系统',
-    children: [
-      {
-        id: 11,
-        label: 'System 模块',
-        children: [
-          {
-            id: 111, label: '新增用户', method: 'POST', url: '/system/user',
-            params: [], headers: [{ active: true, key: 'Content-Type', value: 'application/json', desc: '' }],
-            bodyType: 'json', bodyJson: '{\n  "userName": "admin"\n}'
-          },
-          { id: 112, label: '查询用户列表', method: 'GET', url: '/system/user/list' }
-        ]
-      },
-      {
-        id: 12,
-        label: 'DailyTools 模块',
-        children: [
-          { id: 121, label: '查询工具信息', method: 'GET', url: '/dailytools/queryInfo/list' }
-        ]
-      }
-    ]
-  },
-  {
-    id: 2,
-    label: 'WMS 仓储系统',
-    children: [
-      { id: 21, label: '库存查询', method: 'GET', url: '/wms/stock/query' }
-    ]
-  }
-])
+const apiTreeData = ref([])
 
 const defaultProps = {
   children: 'children',
-  label: 'label'
+  label: 'itemName'
 }
 
 // --- 优化：提取默认表单数据工厂函数 ---
@@ -551,27 +530,28 @@ const getDefaultRequestForm = () => ({
 const requestForm = reactive(getDefaultRequestForm())
 
 // 环境配置初始化
-const initEnvs = () => {
-  const saved = localStorage.getItem('api_tool_envs')
-  if (saved) {
-    envList.value = JSON.parse(saved)
-  } else {
-    envList.value = [
-      { name: '测试环境', key: 'test', url: 'http://192.168.1.20', variables: '{"token": "test_token"}' },
-      { name: '开发环境', key: 'dev', url: 'http://localhost:8080', variables: '{"token": "dev_token"}' },
-      { name: '正式环境', key: 'prod', url: 'https://api.mes.com', variables: '{"token": ""}' }
-    ]
+const initEnvs = async () => {
+  try {
+    const res = await listEnv()
+    envList.value = res.data || []
+  } catch (e) {
+    console.error(e)
   }
 }
-initEnvs()
+
+// 获取树数据
+const getTreeData = async () => {
+  const res = await listApiTree()
+  apiTreeData.value = res.data || []
+}
 
 const currentBaseUrl = computed(() => {
-  const env = envList.value.find(e => e.key === currentEnv.value)
-  return env ? env.url : ''
+  const env = envList.value.find(e => e.envKey === currentEnvKey.value)
+  return env ? env.baseUrl : ''
 })
 
 const urlPlaceholder = computed(() => {
-  return currentEnv.value ? '请输入接口路径 (如 /system/user)' : '请输入完整接口地址 (如 http://localhost/api...)'
+  return currentEnvKey.value ? '请输入接口路径 (如 /system/user)' : '请输入完整接口地址 (如 http://localhost/api...)'
 })
 
 // 响应信息
@@ -580,17 +560,27 @@ const responseInfo = ref(null)
 // 历史记录
 const historyList = ref([])
 
+// 获取历史记录
+const getHistory = async () => {
+  try {
+    const res = await listHistory()
+    historyList.value = res.data || []
+  } catch (e) {
+    console.error("获取历史记录失败", e)
+  }
+}
+
 // 新建表单数据
 const createForm = reactive({
-  type: 'group',
-  label: '',
-  method: 'GET',
-  url: ''
+  itemType: 'group',
+  itemName: '',
+  reqMethod: 'GET',
+  reqUrl: ''
 })
 const createRules = {
-  label: [{ required: true, message: '请输入名称', trigger: 'blur' }],
-  method: [{ required: true, message: '请选择请求方式', trigger: 'change' }],
-  url: [{ required: true, message: '请输入接口地址', trigger: 'blur' }]
+  itemName: [{ required: true, message: '请输入名称', trigger: 'blur' }],
+  reqMethod: [{ required: true, message: '请选择请求方式', trigger: 'change' }],
+  reqUrl: [{ required: true, message: '请输入接口地址', trigger: 'blur' }]
 }
 
 // --- 方法实现 ---
@@ -602,7 +592,7 @@ watch(filterText, (val) => {
 
 const filterNode = (value, data) => {
   if (!value) return true
-  return data.label.includes(value) || (data.url && data.url.includes(value))
+  return data.itemName.includes(value) || (data.reqUrl && data.reqUrl.includes(value))
 }
 
 // 获取请求方法对应的 Tag 类型
@@ -674,7 +664,7 @@ const openEnvManager = () => {
 }
 
 const addEnvRow = () => {
-  envList.value.push({ name: '', key: '', url: '', variables: '{}' })
+  envList.value.push({ envName: '', envKey: '', baseUrl: '', variablesJson: '{}' })
 }
 
 const removeEnvRow = (index) => {
@@ -682,48 +672,75 @@ const removeEnvRow = (index) => {
 }
 
 const saveEnvConfig = () => {
-  if (envList.value.some(e => !e.name || !e.key)) {
+  if (envList.value.some(e => !e.envName || !e.envKey)) {
     ElMessage.warning('环境名称和Key不能为空')
     return
   }
   // 校验 JSON 格式
   try {
-    envList.value.forEach(e => e.variables && JSON.parse(e.variables))
+    envList.value.forEach(e => e.variablesJson && JSON.parse(e.variablesJson))
   } catch (e) {
     ElMessage.warning('变量必须是有效的 JSON 格式')
     return
   }
-  localStorage.setItem('api_tool_envs', JSON.stringify(envList.value))
-  envDialogVisible.value = false
-  ElMessage.success('环境配置已保存')
+  saveEnvList(envList.value).then(() => {
+    envDialogVisible.value = false
+    ElMessage.success('环境配置已保存')
+  })
 }
 
-const handleNodeClick = (data) => {
+// 辅助函数：安全解析 JSON
+const parseJson = (str) => {
+  if (!str) return []
+  if (typeof str === 'object') return str // 已经是对象则直接返回
+  try { return JSON.parse(str) } catch (e) { return [] }
+}
+
+const handleNodeClick = async (data) => {
   // 只有点击具体的接口节点（有method属性）才加载数据
-  if (data.method) {
-    currentNodeId.value = data.id
+  if (data.reqMethod) {
+    currentNodeId.value = data.itemId
 
-    // 1. 重置表单 (使用 Object.assign + 工厂函数，消除冗余代码)
-    Object.assign(requestForm, getDefaultRequestForm())
-    responseDefList.value = []
+    // 获取最新详情
+    try {
+      loading.value = true
+      const res = await getApi(data.itemId)
+      const apiData = res.data
 
-    // 2. 回显数据 (使用 structuredClone 替代 JSON.parse/stringify)
-    requestForm.url = data.url
-    requestForm.method = data.method
+      // 1. 重置表单
+      Object.assign(requestForm, getDefaultRequestForm())
+      responseDefList.value = []
 
-    if (data.params) requestForm.params = structuredClone(data.params)
-    if (data.headers) requestForm.headers = structuredClone(data.headers)
-    if (data.pathParams) requestForm.pathParams = structuredClone(data.pathParams)
-    if (data.bodyType) requestForm.bodyType = data.bodyType
-    if (data.bodyJson) requestForm.bodyJson = data.bodyJson
-    if (data.formData) requestForm.formData = structuredClone(data.formData)
-    if (data.authType) requestForm.authType = data.authType
-    if (data.authToken) requestForm.authToken = data.authToken
-    if (data.responseDef) responseDefList.value = structuredClone(data.responseDef)
+      // 2. 回显数据 (映射后端字段到前端表单)
+      requestForm.url = apiData.reqUrl
+      requestForm.method = apiData.reqMethod
 
-    // 如果是新接口没有默认Header，可以加一个默认的
-    if (requestForm.headers.length === 0) {
-      requestForm.headers.push({ active: true, key: 'Content-Type', value: 'application/json', desc: '' })
+      // JSON 字段解析
+      requestForm.params = parseJson(apiData.reqParams)
+      requestForm.headers = parseJson(apiData.reqHeaders)
+      requestForm.pathParams = parseJson(apiData.reqPathParams)
+      requestForm.formData = parseJson(apiData.reqFormData)
+      requestForm.responseDef = parseJson(apiData.responseDef)
+
+      // 普通字段
+      if (apiData.reqBodyType) requestForm.bodyType = apiData.reqBodyType
+      if (apiData.reqBodyJson) requestForm.bodyJson = apiData.reqBodyJson
+      if (apiData.authType) requestForm.authType = apiData.authType
+      if (apiData.authToken) requestForm.authToken = apiData.authToken
+
+      // 兼容处理：如果 responseDef 解析出来是空的，赋值为空数组
+      if (!requestForm.responseDef) responseDefList.value = []
+      else responseDefList.value = requestForm.responseDef
+
+      // 如果是新接口没有默认Header，可以加一个默认的
+      if (requestForm.headers.length === 0) {
+        requestForm.headers.push({ active: true, key: 'Content-Type', value: 'application/json', desc: '' })
+      }
+    } catch (error) {
+      console.error(error)
+      ElMessage.error('获取接口详情失败')
+    } finally {
+      loading.value = false
     }
   }
 }
@@ -794,10 +811,10 @@ const handleSend = async () => {
 
   // 1. 获取当前环境的变量
   let envVariables = {}
-  const currentEnvObj = envList.value.find(e => e.key === currentEnv.value)
-  if (currentEnvObj && currentEnvObj.variables) {
+  const currentEnvObj = envList.value.find(e => e.envKey === currentEnvKey.value)
+  if (currentEnvObj && currentEnvObj.variablesJson) {
     try {
-      envVariables = JSON.parse(currentEnvObj.variables)
+      envVariables = JSON.parse(currentEnvObj.variablesJson)
     } catch (e) {
       console.error('环境变量解析失败', e)
     }
@@ -828,7 +845,7 @@ const handleSend = async () => {
   finalHeaders.forEach(h => headersObj[h.key] = h.value)
 
   // 创建请求快照 (深拷贝)
-  const snapshot = structuredClone(JSON.parse(JSON.stringify(requestForm))) // 确保去除 Proxy
+  const snapshot = structuredClone(requestForm)
 
   // --- 真实请求逻辑 (建议) ---
   // 注意：纯前端直接请求会遇到 CORS 跨域问题。
@@ -837,68 +854,53 @@ const handleSend = async () => {
   try {
     const startTime = Date.now()
 
-    // 构造 Axios 配置
-    const config = {
+    // 构造代理请求数据
+    const proxyPayload = {
       method: requestForm.method,
-      url: finalUrlWithParams, // 如果配置了代理，这里可能需要处理 url，例如加上 '/api-proxy' 前缀
+      url: finalUrlWithParams,
       headers: headersObj,
-      params: {}, // URL 参数
-      data: null
+      params: {}, // Query Params
+      body: null, // Request Body
+      bodyType: requestForm.bodyType
     }
 
     // 处理 Query Params
     requestForm.params.filter(p => p.active && p.key).forEach(p => {
-      config.params[p.key] = replaceVariables(p.value, envVariables)
+      proxyPayload.params[p.key] = replaceVariables(p.value, envVariables)
     })
 
     // 处理 Body
     if (['POST', 'PUT', 'DELETE'].includes(requestForm.method)) {
       if (requestForm.bodyType === 'json') {
-        try {
-          config.data = JSON.parse(replaceVariables(requestForm.bodyJson, envVariables))
-        } catch (e) {
-          config.data = replaceVariables(requestForm.bodyJson, envVariables) // 发送原始字符串或报错
-        }
+        proxyPayload.body = replaceVariables(requestForm.bodyJson, envVariables)
       } else if (requestForm.bodyType === 'form') {
-        // 处理 FormData...
+        const formDataObj = {}
+        requestForm.formData.filter(f => f.active && f.key).forEach(f => {
+          formDataObj[f.key] = replaceVariables(f.value, envVariables)
+        })
+        proxyPayload.body = formDataObj
       }
     }
 
-    // 模拟发送 (替换为真实请求: const res = await axios(config))
-    // const res = await axios(config) 
-
-    // --- 模拟数据开始 ---
-    await new Promise(r => setTimeout(r, 800)) // 模拟网络延迟
-    const mockRes = {
-      status: 200,
-      statusText: 'OK',
-      data: { code: 200, msg: '操作成功', data: { id: 123, token_used: finalAuthToken } },
-      headers: { 'content-type': 'application/json' }
-    }
-    // --- 模拟数据结束 ---
+    // 发送真实代理请求
+    const res = await proxyRequest(proxyPayload)
+    const actualResponse = res.data // 后端代理接口返回的真实响应
 
     const endTime = Date.now()
     const duration = endTime - startTime
 
     loading.value = false
     responseInfo.value = {
-      status: mockRes.status,
-      statusText: mockRes.statusText,
+      status: actualResponse.status,
+      statusText: actualResponse.statusText,
       time: duration,
-      size: JSON.stringify(mockRes.data).length + ' B', // 简单估算
-      data: typeof mockRes.data === 'object' ? JSON.stringify(mockRes.data, null, 2) : mockRes.data
+      size: actualResponse.size,
+      data: typeof actualResponse.data === 'object' ? JSON.stringify(actualResponse.data, null, 2) : actualResponse.data
     }
     activeResTab.value = 'response'
 
-    // 添加历史
-    historyList.value.unshift({
-      time: new Date().toLocaleString(),
-      method: requestForm.method,
-      url: finalUrlWithParams,
-      status: mockRes.status,
-      duration: duration,
-      snapshot: snapshot
-    })
+    // 刷新历史记录列表 (后端会自动记录)
+    getHistory()
   } catch (error) {
     loading.value = false
     console.error(error)
@@ -969,34 +971,27 @@ const handleSave = () => {
     return
   }
 
-  // 递归查找并更新树节点数据
-  const updateNode = (nodes) => {
-    for (const node of nodes) {
-      if (node.id === currentNodeId.value) {
-        node.url = requestForm.url
-        node.method = requestForm.method
-        node.params = structuredClone(requestForm.params)
-        node.headers = structuredClone(requestForm.headers)
-        node.pathParams = structuredClone(requestForm.pathParams)
-        node.bodyType = requestForm.bodyType
-        node.bodyJson = requestForm.bodyJson
-        node.formData = structuredClone(requestForm.formData)
-        node.authType = requestForm.authType
-        node.authToken = requestForm.authToken
-        node.responseDef = structuredClone(responseDefList.value)
-        return true
-      }
-      if (node.children && node.children.length > 0) {
-        if (updateNode(node.children)) return true
-      }
-    }
-    return false
+  // 构造保存数据
+  const saveData = {
+    itemId: currentNodeId.value,
+    reqUrl: requestForm.url,
+    reqMethod: requestForm.method,
+    // 复杂对象转 JSON 字符串存入数据库
+    reqParams: JSON.stringify(requestForm.params),
+    reqHeaders: JSON.stringify(requestForm.headers),
+    reqPathParams: JSON.stringify(requestForm.pathParams),
+    reqFormData: JSON.stringify(requestForm.formData),
+    responseDef: JSON.stringify(responseDefList.value),
+    reqBodyType: requestForm.bodyType,
+    reqBodyJson: requestForm.bodyJson,
+    authType: requestForm.authType,
+    authToken: requestForm.authToken
   }
 
-  if (updateNode(apiTreeData.value)) {
-    ElMessage.success('接口信息已保存 (本地暂存)')
-    // TODO: 这里未来调用后端保存接口 API
-  }
+  updateApi(saveData).then(() => {
+    ElMessage.success('接口信息已保存')
+    getTreeData() // 刷新树
+  })
 }
 
 const handleGenerateCode = () => {
@@ -1051,13 +1046,13 @@ const handleExportDoc = () => {
 }
 
 const restoreHistory = (item) => {
-  if (item.snapshot) {
-    Object.assign(requestForm, structuredClone(item.snapshot))
+  if (item.snapshotJson) {
+    Object.assign(requestForm, JSON.parse(item.snapshotJson))
     ElMessage.success('已恢复历史参数')
   } else {
     // 兼容旧数据
-    requestForm.method = item.method
-    requestForm.url = item.url.replace(currentBaseUrl.value, '')
+    requestForm.method = item.reqMethod
+    requestForm.url = item.reqUrl.replace(currentBaseUrl.value, '')
     ElMessage.success('已恢复部分历史参数')
   }
 }
@@ -1107,22 +1102,20 @@ const flattenJson = (obj, prefix = '') => {
 // --- 优化：统一删除逻辑 (供顶部按钮和右键菜单共用) ---
 const execDeleteNode = (node) => {
   const data = node.data
-  ElMessageBox.confirm(`确定要删除 "${data.label}" 吗?`, '警告', {
+  ElMessageBox.confirm(`确定要删除 "${data.itemName}" 吗?`, '警告', {
     confirmButtonText: '确定删除',
     cancelButtonText: '取消',
     type: 'warning',
   }).then(() => {
-    const parent = node.parent
-    const children = parent.data.children || parent.data
-    const index = children.findIndex(d => d.id === data.id)
-    children.splice(index, 1)
-
-    // 如果删除的是当前选中的节点，清空选中状态并重置表单
-    if (currentNodeId.value === data.id) {
-      currentNodeId.value = null
-      Object.assign(requestForm, getDefaultRequestForm())
-    }
-    ElMessage.success('删除成功')
+    delApi(data.itemId).then(() => {
+      ElMessage.success('删除成功')
+      getTreeData() // 刷新树
+      // 如果删除的是当前选中的节点，清空选中状态
+      if (currentNodeId.value === data.itemId) {
+        currentNodeId.value = null
+        Object.assign(requestForm, getDefaultRequestForm())
+      }
+    })
   }).catch(() => { })
 }
 
@@ -1142,7 +1135,7 @@ const handleContextMenu = (action) => {
   switch (action) {
     case 'addChild':
       // 只有分组可以添加子节点
-      if (node.data.method) {
+      if (node.data.reqMethod) {
         ElMessage.warning('接口节点下不能再添加子节点')
         return
       }
@@ -1154,8 +1147,10 @@ const handleContextMenu = (action) => {
         cancelButtonText: '取消',
         inputValue: node.label,
       }).then(({ value }) => {
-        node.data.label = value
-        ElMessage.success('重命名成功')
+        updateApi({ itemId: node.data.itemId, itemName: value }).then(() => {
+          ElMessage.success('重命名成功')
+          getTreeData()
+        })
       }).catch(() => { })
       break
     case 'delete':
@@ -1176,10 +1171,10 @@ const handleDeleteNode = () => {
 
 // 新建逻辑
 const handleCreate = (parentNode = null) => {
-  createForm.type = 'group'
-  createForm.label = ''
-  createForm.method = 'GET'
-  createForm.url = ''
+  createForm.itemType = 'group'
+  createForm.itemName = ''
+  createForm.reqMethod = 'GET'
+  createForm.reqUrl = ''
   createDialogVisible.value = true
 
   // 如果是从右键菜单“新增子节点”进来，parentNode 是 Node 对象
@@ -1193,38 +1188,31 @@ const handleCreate = (parentNode = null) => {
 const submitCreate = () => {
   createFormRef.value.validate((valid) => {
     if (valid) {
-      const newNode = {
-        id: Date.now(),
-        label: createForm.label,
-        children: []
+      const postData = {
+        itemName: createForm.itemName,
+        itemType: createForm.itemType,
+        parentId: createParentNode.value ? createParentNode.value.data.itemId : 0
       }
 
-      if (createForm.type === 'api') {
-        newNode.method = createForm.method
-        newNode.url = createForm.url
-        delete newNode.children
+      if (createForm.itemType === 'api') {
+        postData.reqMethod = createForm.reqMethod
+        postData.reqUrl = createForm.reqUrl
       }
 
-      // 获取当前选中的节点，如果是分组则添加到该分组下，否则添加到根节点
-      let currentNode = null
-      if (createParentNode.value) {
-        currentNode = createParentNode.value.data
-      } else {
-        currentNode = treeRef.value.getCurrentNode()
-      }
-
-      if (currentNode && !currentNode.method) { // 选中了分组节点
-        if (!currentNode.children) currentNode.children = []
-        currentNode.children.push(newNode)
-      } else {
-        apiTreeData.value.push(newNode)
-      }
-
-      createDialogVisible.value = false
-      ElMessage.success('创建成功')
+      addApi(postData).then(() => {
+        ElMessage.success('创建成功')
+        createDialogVisible.value = false
+        getTreeData()
+      })
     }
   })
 }
+
+onMounted(() => {
+  initEnvs()
+  getTreeData()
+  getHistory()
+})
 </script>
 
 <style scoped lang="scss">
