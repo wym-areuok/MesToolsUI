@@ -132,7 +132,7 @@ const updateLogs = [
 // 工具列表配置
 const toolList = reactive([
   {
-    title: '密码修改',
+    title: 'FisWeb密码修改',
     desc: '修改FIS/其他工号密码',
     icon: 'Lock',
     path: '/dailyTools/changePwd',
@@ -171,6 +171,14 @@ const toolList = reactive([
     path: '/dailyTools/stringTool',
     bgColor: '#909399',
     permissions: ['dailyTools:stringTool:execute']
+  }, {
+    title: '接口管理',
+    desc: '接口信息查询和发送',
+    icon: 'Search',
+    path: '/dailyTools/apiManage',
+    bgColor: '#4285F4',
+    permissions: ['dailyTools:apiManage:list'],
+    count: 0
   }
 ])
 

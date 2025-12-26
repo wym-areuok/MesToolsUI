@@ -14,12 +14,13 @@
       </div>
       <div class="api-tree-wrapper" @click="handleWrapperClick">
         <el-tree ref="treeRef" :data="apiTreeData" :props="defaultProps" :expand-on-click-node="false"
-          :filter-node-method="filterNode" node-key="itemId" default-expand-all highlight-current
-          @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
+          :filter-node-method="filterNode" node-key="itemId" highlight-current draggable :allow-drop="allowDrop"
+          @node-drop="handleNodeDrop" @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
           <template #default="{ node, data }">
             <span class="custom-tree-node">
-              <el-tag v-if="data.reqMethod" size="small" :type="getMethodType(data.reqMethod)" class="method-tag">{{
-                data.reqMethod }}</el-tag>
+              <el-tag v-if="data.itemType === 'api'" size="small" :type="getMethodType(data.reqMethod)"
+                class="method-tag">{{
+                  data.reqMethod }}</el-tag>
               <span v-else class="folder-icon"><el-icon>
                   <Folder />
                 </el-icon></span>
@@ -54,9 +55,9 @@
           <!-- 环境选择 -->
           <el-col :span="4">
             <div style="display: flex; gap: 5px;">
-              <el-select v-model="currentEnvKey" placeholder="选择环境" style="width: 100%" clearable>
+              <el-select v-model="currentItemKey" placeholder="选择环境" style="width: 100%" clearable>
                 <el-option label="未设定 (自定义)" value="" />
-                <el-option v-for="env in envList" :key="env.envKey" :label="env.envName" :value="env.envKey" />
+                <el-option v-for="env in envList" :key="env.itemKey" :label="env.itemName" :value="env.itemKey" />
               </el-select>
               <el-button icon="Setting" circle @click="openEnvManager" title="环境管理" />
             </div>
@@ -64,16 +65,27 @@
 
           <!-- URL 输入区 -->
           <el-col :span="12">
-            <el-input v-model="requestForm.url" :placeholder="urlPlaceholder">
-              <template #prepend>
-                <el-select v-model="requestForm.method" style="width: 100px">
-                  <el-option label="GET" value="GET" />
-                  <el-option label="POST" value="POST" />
-                  <el-option label="PUT" value="PUT" />
-                  <el-option label="DELETE" value="DELETE" />
-                </el-select>
-              </template>
-            </el-input>
+            <div style="display: flex; gap: 5px;">
+              <el-input v-model="requestForm.itemName" placeholder="接口名称" style="width: 180px" />
+              <el-input v-model="requestForm.url" :placeholder="urlPlaceholder" style="flex: 1">
+                <template #prepend>
+                  <el-select v-model="requestForm.method" style="width: 105px">
+                    <el-option label="GET" value="GET">
+                      <span style="color: var(--el-color-success); font-weight: bold">GET</span>
+                    </el-option>
+                    <el-option label="POST" value="POST">
+                      <span style="color: var(--el-color-warning); font-weight: bold">POST</span>
+                    </el-option>
+                    <el-option label="PUT" value="PUT">
+                      <span style="color: var(--el-color-primary); font-weight: bold">PUT</span>
+                    </el-option>
+                    <el-option label="DELETE" value="DELETE">
+                      <span style="color: var(--el-color-danger); font-weight: bold">DELETE</span>
+                    </el-option>
+                  </el-select>
+                </template>
+              </el-input>
+            </div>
           </el-col>
 
           <!-- 操作按钮 -->
@@ -161,7 +173,9 @@
                       </el-table-column>
                       <el-table-column label="Value" width="200">
                         <template #default="scope">
-                          <el-input v-model="scope.row.value" placeholder="Value" />
+                          <el-autocomplete v-model="scope.row.value"
+                            :fetch-suggestions="(qs, cb) => queryHeaderValueSearch(scope.row, qs, cb)"
+                            placeholder="Value" style="width: 100%" />
                         </template>
                       </el-table-column>
                       <el-table-column label="Description">
@@ -304,7 +318,8 @@
                       <span class="meta-item">耗时: {{ responseInfo.time }}ms</span>
                       <span class="meta-item">大小: {{ responseInfo.size }}</span>
                       <el-button type="primary" link size="small" style="margin-left: auto;"
-                        @click="handleImportResponse">导入为响应结构</el-button>
+                        @click="handleCopyResponse">复制</el-button>
+                      <el-button type="primary" link size="small" @click="handleImportResponse">导入为响应结构</el-button>
                       <el-divider direction="vertical" />
                       <el-radio-group v-model="responseViewMode" size="small">
                         <el-radio-button label="pretty">Pretty</el-radio-button>
@@ -356,10 +371,9 @@
     <!-- 新建接口/分组弹窗 -->
     <el-dialog v-model="createDialogVisible" title="新建" width="500px">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
-        <el-form-item label="类型" prop="type">
+        <el-form-item label="类型" prop="itemType">
           <el-radio-group v-model="createForm.itemType">
-            <el-radio label="group">分组/模块</el-radio>
-            <el-radio label="api">接口</el-radio>
+            <el-radio v-for="item in nodeTypeOptions" :key="item.value" :label="item.value">{{ item.label }}</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="名称" prop="itemName">
@@ -390,24 +404,24 @@
     <!-- 环境管理弹窗 -->
     <el-dialog v-model="envDialogVisible" title="环境管理" width="600px">
       <el-table :data="envList" border stripe>
-        <el-table-column prop="envName" label="环境名称">
+        <el-table-column prop="itemName" label="环境名称">
           <template #default="{ row }">
-            <el-input v-model="row.envName" placeholder="如: 测试环境" />
+            <el-input v-model="row.itemName" placeholder="如: 测试环境" />
           </template>
         </el-table-column>
-        <el-table-column prop="envKey" label="Key (唯一)">
+        <el-table-column prop="itemKey" label="Key (唯一)">
           <template #default="{ row }">
-            <el-input v-model="row.envKey" placeholder="如: test" />
+            <el-input v-model="row.itemKey" placeholder="如: test" />
           </template>
         </el-table-column>
-        <el-table-column prop="baseUrl" label="Base URL">
+        <el-table-column prop="reqUrl" label="Base URL">
           <template #default="{ row }">
-            <el-input v-model="row.baseUrl" placeholder="http://..." />
+            <el-input v-model="row.reqUrl" placeholder="http://..." />
           </template>
         </el-table-column>
-        <el-table-column prop="variablesJson" label="变量 (JSON)">
+        <el-table-column prop="reqBodyJson" label="环境变量 (JSON)">
           <template #default="{ row }">
-            <el-input v-model="row.variablesJson" placeholder='{"token": "..."}' />
+            <el-input v-model="row.reqBodyJson" placeholder='{"token": "..."}' />
           </template>
         </el-table-column>
         <el-table-column width="60" align="center">
@@ -448,6 +462,8 @@
 </template>
 
 <script setup name="ApiManager">
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Codemirror } from 'vue-codemirror'
 import { json } from '@codemirror/lang-json'
 import { Splitpanes, Pane } from "splitpanes"
@@ -468,7 +484,7 @@ import {
 // --- 状态定义 ---
 const filterText = ref('')
 const treeRef = ref(null)
-const currentEnvKey = ref('')
+const currentItemKey = ref('')
 const loading = ref(false)
 const envDialogVisible = ref(false)
 const envList = ref([])
@@ -489,6 +505,13 @@ const contextMenu = reactive({
   node: null
 })
 const responseDefList = ref([])
+
+// 节点类型选项 (本地常量管理即可，无需后端字典)
+const nodeTypeOptions = [
+  { label: '分组/模块', value: 'group' },
+  { label: '接口', value: 'api' }
+]
+
 const currentNodeId = ref(null) // 记录当前选中的节点ID
 const createParentNode = ref(null) // 用于存储新建时的父节点
 
@@ -506,6 +529,7 @@ const defaultProps = {
 
 // --- 优化：提取默认表单数据工厂函数 ---
 const getDefaultRequestForm = () => ({
+  itemName: '',
   method: 'GET',
   url: '',
   pathParams: [],
@@ -546,12 +570,12 @@ const getTreeData = async () => {
 }
 
 const currentBaseUrl = computed(() => {
-  const env = envList.value.find(e => e.envKey === currentEnvKey.value)
-  return env ? env.baseUrl : ''
+  const env = envList.value.find(e => e.itemKey === currentItemKey.value)
+  return env ? env.reqUrl : ''
 })
 
 const urlPlaceholder = computed(() => {
-  return currentEnvKey.value ? '请输入接口路径 (如 /system/user)' : '请输入完整接口地址 (如 http://localhost/api...)'
+  return currentItemKey.value ? '请输入接口路径 (如 /system/user)' : '请输入完整接口地址 (如 http://localhost/api...)'
 })
 
 // 响应信息
@@ -664,7 +688,7 @@ const openEnvManager = () => {
 }
 
 const addEnvRow = () => {
-  envList.value.push({ envName: '', envKey: '', baseUrl: '', variablesJson: '{}' })
+  envList.value.push({ itemName: '', itemKey: '', reqUrl: '', reqBodyJson: '{}', itemType: 'env' })
 }
 
 const removeEnvRow = (index) => {
@@ -672,13 +696,13 @@ const removeEnvRow = (index) => {
 }
 
 const saveEnvConfig = () => {
-  if (envList.value.some(e => !e.envName || !e.envKey)) {
+  if (envList.value.some(e => !e.itemName || !e.itemKey)) {
     ElMessage.warning('环境名称和Key不能为空')
     return
   }
   // 校验 JSON 格式
   try {
-    envList.value.forEach(e => e.variablesJson && JSON.parse(e.variablesJson))
+    envList.value.forEach(e => e.reqBodyJson && JSON.parse(e.reqBodyJson))
   } catch (e) {
     ElMessage.warning('变量必须是有效的 JSON 格式')
     return
@@ -698,7 +722,7 @@ const parseJson = (str) => {
 
 const handleNodeClick = async (data) => {
   // 只有点击具体的接口节点（有method属性）才加载数据
-  if (data.reqMethod) {
+  if (data.itemType === 'api') {
     currentNodeId.value = data.itemId
 
     // 获取最新详情
@@ -712,6 +736,7 @@ const handleNodeClick = async (data) => {
       responseDefList.value = []
 
       // 2. 回显数据 (映射后端字段到前端表单)
+      requestForm.itemName = apiData.itemName
       requestForm.url = apiData.reqUrl
       requestForm.method = apiData.reqMethod
 
@@ -732,16 +757,19 @@ const handleNodeClick = async (data) => {
       if (!requestForm.responseDef) responseDefList.value = []
       else responseDefList.value = requestForm.responseDef
 
-      // 如果是新接口没有默认Header，可以加一个默认的
-      if (requestForm.headers.length === 0) {
-        requestForm.headers.push({ active: true, key: 'Content-Type', value: 'application/json', desc: '' })
-      }
+      // 移除此处强制添加默认 Header 的逻辑，避免覆盖用户保存的“无 Header”状态
+      // 默认 Header 仅在 getDefaultRequestForm 中初始化，用于新建或重置
     } catch (error) {
       console.error(error)
       ElMessage.error('获取接口详情失败')
     } finally {
       loading.value = false
     }
+  } else {
+    // 修复：点击分组等非API节点时，清空选中状态，防止误操作覆盖上一个接口数据
+    currentNodeId.value = null
+    Object.assign(requestForm, getDefaultRequestForm())
+    responseDefList.value = []
   }
 }
 
@@ -766,13 +794,40 @@ const removeRow = (list, index) => {
   list.splice(index, 1)
 }
 
-// Header 自动补全建议
-const queryHeaderSearch = (queryString, cb) => {
-  const headers = [
-    { value: 'Accept' }, { value: 'Authorization' }, { value: 'Content-Type' },
-    { value: 'Cache-Control' }, { value: 'User-Agent' }
+// --- UX优化: 增强的 Header 补全 ---
+const commonHeaderKeys = [
+  { value: 'Accept' }, { value: 'Accept-Charset' }, { value: 'Accept-Encoding' }, { value: 'Accept-Language' },
+  { value: 'Authorization' }, { value: 'Cache-Control' }, { value: 'Connection' }, { value: 'Content-Length' },
+  { value: 'Content-Type' }, { value: 'Cookie' }, { value: 'Date' }, { value: 'Expect' }, { value: 'Host' },
+  { value: 'If-Match' }, { value: 'If-Modified-Since' }, { value: 'If-None-Match' }, { value: 'Origin' },
+  { value: 'Pragma' }, { value: 'Referer' }, { value: 'User-Agent' }, { value: 'X-Requested-With' }, { value: 'X-Forwarded-For' }
+]
+
+const commonHeaderValues = {
+  'content-type': [
+    { value: 'application/json' }, { value: 'application/x-www-form-urlencoded' },
+    { value: 'multipart/form-data' }, { value: 'text/html' }, { value: 'text/plain' }
+  ],
+  'accept': [
+    { value: 'application/json' }, { value: '*/*' }, { value: 'text/html' }, { value: 'text/plain' }
+  ],
+  'cache-control': [
+    { value: 'no-cache' }, { value: 'no-store' }, { value: 'max-age=0' }
+  ],
+  'connection': [
+    { value: 'keep-alive' }, { value: 'close' }
   ]
-  const results = queryString ? headers.filter(h => h.value.toLowerCase().indexOf(queryString.toLowerCase()) === 0) : headers
+}
+
+const queryHeaderSearch = (queryString, cb) => {
+  const results = queryString ? commonHeaderKeys.filter(h => h.value.toLowerCase().includes(queryString.toLowerCase())) : commonHeaderKeys
+  cb(results)
+}
+
+const queryHeaderValueSearch = (row, queryString, cb) => {
+  const key = row.key ? row.key.toLowerCase() : ''
+  const suggestions = commonHeaderValues[key] || []
+  const results = queryString ? suggestions.filter(s => s.value.toLowerCase().includes(queryString.toLowerCase())) : suggestions
   cb(results)
 }
 
@@ -799,7 +854,9 @@ const replacePathParams = (url, pathParams) => {
   let newUrl = url
   pathParams.forEach(p => {
     if (p.key && p.value) {
-      newUrl = newUrl.replace(new RegExp(`\\{${p.key}\\}`, 'g'), p.value)
+      // 修复：对 key 进行正则转义，防止特殊字符导致报错
+      const escapedKey = p.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      newUrl = newUrl.replace(new RegExp(`\\{${escapedKey}\\}`, 'g'), p.value)
     }
   })
   return newUrl
@@ -807,14 +864,34 @@ const replacePathParams = (url, pathParams) => {
 
 // 发送请求
 const handleSend = async () => {
+  // 1. 基础校验
+  if (!requestForm.url) {
+    ElMessage.warning('请输入接口地址')
+    return
+  }
+
+  // 2. JSON Body 校验 (仅在 POST/PUT/DELETE 且类型为 JSON 时)
+  // 注意：如果包含 {{}} 变量，则跳过校验，防止因变量未替换而导致 JSON 解析失败
+  if (['POST', 'PUT', 'DELETE'].includes(requestForm.method) && requestForm.bodyType === 'json') {
+    const jsonStr = requestForm.bodyJson ? requestForm.bodyJson.trim() : ''
+    if (jsonStr && !jsonStr.includes('{{')) {
+      try {
+        JSON.parse(jsonStr)
+      } catch (e) {
+        ElMessage.warning('Body JSON 格式错误，请检查')
+        return
+      }
+    }
+  }
+
   loading.value = true
 
   // 1. 获取当前环境的变量
   let envVariables = {}
-  const currentEnvObj = envList.value.find(e => e.envKey === currentEnvKey.value)
-  if (currentEnvObj && currentEnvObj.variablesJson) {
+  const currentEnvObj = envList.value.find(e => e.itemKey === currentItemKey.value)
+  if (currentEnvObj && currentEnvObj.reqBodyJson) {
     try {
-      envVariables = JSON.parse(currentEnvObj.variablesJson)
+      envVariables = JSON.parse(currentEnvObj.reqBodyJson)
     } catch (e) {
       console.error('环境变量解析失败', e)
     }
@@ -822,9 +899,23 @@ const handleSend = async () => {
 
   // 2. 执行变量替换 (URL, Headers, AuthToken, Body)
   // 注意：这里只替换用于发送的临时变量，不修改 requestForm 显示的值
-  const finalUrl = replaceVariables(currentBaseUrl.value + requestForm.url, envVariables)
+  const resolvedUrl = replaceVariables(requestForm.url, envVariables)
+  const resolvedBaseUrl = replaceVariables(currentBaseUrl.value, envVariables)
+
+  let finalUrl = ''
+  // 修复：如果 URL 是绝对路径，则忽略 Base URL
+  if (/^https?:\/\//i.test(resolvedUrl)) {
+    finalUrl = resolvedUrl
+  } else {
+    // 处理拼接时的斜杠问题
+    const base = resolvedBaseUrl.replace(/\/$/, '')
+    const path = resolvedUrl.replace(/^\//, '')
+    finalUrl = base ? `${base}/${path}` : resolvedUrl
+  }
+
   const finalAuthToken = replaceVariables(requestForm.authToken, envVariables)
-  const finalUrlWithParams = replacePathParams(finalUrl, requestForm.pathParams)
+  // 先替换 Path Params
+  finalUrl = replacePathParams(finalUrl, requestForm.pathParams)
 
   // 组装最终 Headers (包含变量替换)
   const finalHeaders = requestForm.headers.map(h => ({
@@ -857,17 +948,28 @@ const handleSend = async () => {
     // 构造代理请求数据
     const proxyPayload = {
       method: requestForm.method,
-      url: finalUrlWithParams,
+      url: finalUrl, // 此时 url 包含 path params，但不包含 query params
       headers: headersObj,
-      params: {}, // Query Params
+      params: {}, // Query Params 留空，改为手动拼接到 URL
       body: null, // Request Body
       bodyType: requestForm.bodyType
     }
 
-    // 处理 Query Params
-    requestForm.params.filter(p => p.active && p.key).forEach(p => {
-      proxyPayload.params[p.key] = replaceVariables(p.value, envVariables)
-    })
+    // 处理 Query Params (手动拼接以支持重复 Key，如 ?id=1&id=2)
+    const activeParams = requestForm.params.filter(p => p.active && p.key)
+    if (activeParams.length > 0) {
+      const queryString = activeParams.map(p => {
+        const key = p.key
+        const val = replaceVariables(p.value, envVariables)
+        return `${encodeURIComponent(key)}=${encodeURIComponent(val)}`
+      }).join('&')
+
+      if (proxyPayload.url.includes('?')) {
+        proxyPayload.url += '&' + queryString
+      } else {
+        proxyPayload.url += '?' + queryString
+      }
+    }
 
     // 处理 Body
     if (['POST', 'PUT', 'DELETE'].includes(requestForm.method)) {
@@ -889,15 +991,33 @@ const handleSend = async () => {
     const endTime = Date.now()
     const duration = endTime - startTime
 
+    // 尝试格式化响应数据，以便在 Pretty 视图中显示
+    let displayData = actualResponse.data
+    if (typeof displayData === 'string') {
+      try {
+        displayData = JSON.stringify(JSON.parse(displayData), null, 2)
+      } catch (e) { /* 不是JSON，保持原样 */ }
+    } else if (typeof displayData === 'object') {
+      displayData = JSON.stringify(displayData, null, 2)
+    }
+
     loading.value = false
     responseInfo.value = {
       status: actualResponse.status,
       statusText: actualResponse.statusText,
       time: duration,
       size: actualResponse.size,
-      data: typeof actualResponse.data === 'object' ? JSON.stringify(actualResponse.data, null, 2) : actualResponse.data
+      data: displayData
     }
     activeResTab.value = 'response'
+
+    // 3. 结果反馈
+    if (actualResponse.status === 0) {
+      ElMessage.error('请求发送失败: ' + (typeof actualResponse.data === 'string' ? actualResponse.data : '网络或代理错误'))
+    } else {
+      // 成功或正常的 HTTP 错误响应 (404, 500 等)
+      ElMessage.success(`请求完成 (Status: ${actualResponse.status})`)
+    }
 
     // 刷新历史记录列表 (后端会自动记录)
     getHistory()
@@ -970,10 +1090,19 @@ const handleSave = () => {
     ElMessage.warning('请先选择一个接口节点')
     return
   }
+  if (!requestForm.itemName) {
+    ElMessage.warning('接口名称不能为空')
+    return
+  }
+  if (!requestForm.url) {
+    ElMessage.warning('接口地址不能为空')
+    return
+  }
 
   // 构造保存数据
   const saveData = {
     itemId: currentNodeId.value,
+    itemName: requestForm.itemName,
     reqUrl: requestForm.url,
     reqMethod: requestForm.method,
     // 复杂对象转 JSON 字符串存入数据库
@@ -996,7 +1125,16 @@ const handleSave = () => {
 
 const handleGenerateCode = () => {
   const { method, url, params, headers, bodyType, bodyJson, pathParams } = requestForm;
-  let finalUrl = currentBaseUrl.value + url;
+
+  // 修复：生成代码时同样处理绝对路径和 Base URL
+  let finalUrl = ''
+  if (/^https?:\/\//i.test(url)) {
+    finalUrl = url
+  } else {
+    const base = currentBaseUrl.value.replace(/\/$/, '')
+    const path = url.replace(/^\//, '')
+    finalUrl = base ? `${base}/${path}` : url
+  }
 
   // 替换 Path Params
   finalUrl = replacePathParams(finalUrl, pathParams);
@@ -1041,6 +1179,13 @@ const handleGenerateCode = () => {
   generateCodeVisible.value = true;
 }
 
+const copyGeneratedCode = () => {
+  navigator.clipboard.writeText(generatedCode.value).then(() => {
+    ElMessage.success('代码已复制')
+    generateCodeVisible.value = false
+  }).catch(() => ElMessage.error('复制失败'))
+}
+
 const handleExportDoc = () => {
   ElMessage.info('文档导出功能开发中...')
 }
@@ -1057,13 +1202,23 @@ const restoreHistory = (item) => {
   }
 }
 
+const handleCopyResponse = () => {
+  if (responseInfo.value && responseInfo.value.data) {
+    navigator.clipboard.writeText(responseInfo.value.data).then(() => {
+      ElMessage.success('复制成功')
+    }).catch(() => {
+      ElMessage.error('复制失败，请手动复制')
+    })
+  }
+}
+
 const handleImportResponse = () => {
   if (!responseInfo.value || !responseInfo.value.data) {
     ElMessage.warning('暂无响应数据')
     return
   }
   try {
-    const json = JSON.parse(responseInfo.value.data)
+    const json = parseJson(responseInfo.value.data) // 使用 parseJson 更安全
     responseDefList.value = flattenJson(json)
     activeReqTab.value = 'responseDef'
     ElMessage.success('响应结构导入成功')
@@ -1135,7 +1290,7 @@ const handleContextMenu = (action) => {
   switch (action) {
     case 'addChild':
       // 只有分组可以添加子节点
-      if (node.data.reqMethod) {
+      if (node.data.itemType === 'api') {
         ElMessage.warning('接口节点下不能再添加子节点')
         return
       }
@@ -1150,6 +1305,10 @@ const handleContextMenu = (action) => {
         updateApi({ itemId: node.data.itemId, itemName: value }).then(() => {
           ElMessage.success('重命名成功')
           getTreeData()
+          // 修复：如果重命名的是当前选中的节点，同步更新右侧表单显示的名称
+          if (currentNodeId.value === node.data.itemId) {
+            requestForm.itemName = value
+          }
         })
       }).catch(() => { })
       break
@@ -1177,6 +1336,10 @@ const handleCreate = (parentNode = null) => {
   createForm.reqUrl = ''
   createDialogVisible.value = true
 
+  nextTick(() => {
+    createFormRef.value?.clearValidate()
+  })
+
   // 如果是从右键菜单“新增子节点”进来，parentNode 是 Node 对象
   if (parentNode && parentNode.data) {
     createParentNode.value = parentNode
@@ -1185,26 +1348,64 @@ const handleCreate = (parentNode = null) => {
   }
 }
 
-const submitCreate = () => {
-  createFormRef.value.validate((valid) => {
-    if (valid) {
-      const postData = {
-        itemName: createForm.itemName,
-        itemType: createForm.itemType,
-        parentId: createParentNode.value ? createParentNode.value.data.itemId : 0
-      }
+const submitCreate = async () => {
+  if (!createFormRef.value) return
 
-      if (createForm.itemType === 'api') {
-        postData.reqMethod = createForm.reqMethod
-        postData.reqUrl = createForm.reqUrl
-      }
+  try {
+    await createFormRef.value.validate()
+  } catch (e) {
+    return // 校验失败，停止执行
+  }
 
-      addApi(postData).then(() => {
-        ElMessage.success('创建成功')
-        createDialogVisible.value = false
-        getTreeData()
-      })
-    }
+  const postData = {
+    itemName: createForm.itemName,
+    itemType: createForm.itemType,
+    parentId: createParentNode.value ? createParentNode.value.data.itemId : 0
+  }
+
+  if (createForm.itemType === 'api') {
+    postData.reqMethod = createForm.reqMethod
+    postData.reqUrl = createForm.reqUrl
+  }
+
+  try {
+    await addApi(postData)
+    ElMessage.success('创建成功')
+    createDialogVisible.value = false
+    getTreeData()
+  } catch (e) {
+    console.error(e)
+    // 发生错误时不关闭弹窗，允许用户重试
+  }
+}
+
+// --- 拖拽功能逻辑 ---
+
+// 拖拽规则控制
+const allowDrop = (draggingNode, dropNode, type) => {
+  // type: 'prev' (前), 'inner' (内), 'next' (后)
+  // 只有“分组”节点允许被插入内部 ('inner')
+  if (type === 'inner') {
+    return dropNode.data.itemType === 'group'
+  }
+  return true
+}
+
+// 拖拽完成后的处理
+const handleNodeDrop = (draggingNode, dropNode, dropType, ev) => {
+  let newParentId = 0
+  if (dropType === 'inner') {
+    newParentId = dropNode.data.itemId
+  } else {
+    // 如果是拖到前后，则父节点与目标节点相同
+    newParentId = dropNode.data.parentId
+  }
+
+  // 调用后端更新父节点ID
+  updateApi({ itemId: draggingNode.data.itemId, parentId: newParentId }).then(() => {
+    ElMessage.success('移动成功')
+  }).catch(() => {
+    getTreeData() // 失败则刷新树，恢复原状
   })
 }
 
