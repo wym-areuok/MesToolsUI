@@ -95,3 +95,20 @@ export function proxyRequest(data) {
     data: data
   })
 }
+
+// 导出所有数据
+export function exportData() {
+  return request({
+    url: '/dailytools/apiManage/export',
+    method: 'get'
+  })
+}
+
+// 导入数据
+export function importData(data) {
+  return request({
+    url: '/dailytools/apiManage/import',
+    method: 'post',
+    data: data
+  })
+}

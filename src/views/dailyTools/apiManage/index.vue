@@ -6,7 +6,15 @@
         <span>接口列表</span>
         <div>
           <el-button type="primary" link icon="Plus" size="small" @click="handleCreate">新建</el-button>
-          <el-button type="danger" link icon="Delete" size="small" @click="handleDeleteNode">删除</el-button>
+          <el-dropdown trigger="click" @command="handleMoreCommand">
+            <el-button type="primary" link icon="More" size="small" style="margin-left: 5px"></el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="import" icon="Upload">导入备份</el-dropdown-item>
+                <el-dropdown-item command="export" icon="Download">导出备份</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
       <div class="sidebar-search">
@@ -38,6 +46,9 @@
         <div class="menu-item" @click="handleContextMenu('rename')"><el-icon>
             <EditPen />
           </el-icon> 重命名</div>
+        <div class="menu-item" @click="handleContextMenu('exportDoc')"><el-icon>
+            <Document />
+          </el-icon> 导出文档</div>
         <div class="menu-item danger" @click="handleContextMenu('delete')"><el-icon>
             <Delete />
           </el-icon> 删除</div>
@@ -64,8 +75,8 @@
           </el-col>
 
           <!-- URL 输入区 -->
-          <el-col :span="12">
-            <div style="display: flex; gap: 5px;">
+          <el-col :span="14">
+            <div style="display: flex; gap: 10px;">
               <el-input v-model="requestForm.itemName" placeholder="接口名称" style="width: 180px" />
               <el-input v-model="requestForm.url" :placeholder="urlPlaceholder" style="flex: 1">
                 <template #prepend>
@@ -89,28 +100,19 @@
           </el-col>
 
           <!-- 操作按钮 -->
-          <el-col :span="8">
-            <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
-            <el-button type="success" plain icon="FolderChecked" @click="handleSave">保存</el-button>
-            <el-button type="info" plain icon="Download" @click="handleCurlImport">cURL导入</el-button>
-            <el-dropdown style="margin-left: 12px">
-              <el-button type="primary" plain>
-                更多操作<el-icon class="el-icon--right"><arrow-down /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item @click="handleGenerateCode" icon="Tickets">生成代码</el-dropdown-item>
-                  <el-dropdown-item @click="handleExportDoc" icon="Document">导出文档</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+          <el-col :span="6">
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+              <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
+              <el-button type="success" plain icon="FolderChecked" @click="handleSave">保存</el-button>
+              <el-button type="info" plain icon="Download" @click="handleCurlImport">cURL</el-button>
+            </div>
           </el-col>
         </el-row>
       </div>
 
       <!-- 核心工作区 -->
       <div class="workspace">
-        <splitpanes class="default-theme" @resize="paneSize = $event[0].size">
+        <splitpanes class="default-theme">
           <!-- 左侧：请求配置 -->
           <pane :size="60">
             <div class="request-panel">
@@ -441,34 +443,18 @@
       </template>
     </el-dialog>
 
-    <!-- 生成代码弹窗 -->
-    <el-dialog v-model="generateCodeVisible" title="生成代码" width="700px">
-      <div class="code-generator-dialog">
-        <el-tabs v-model="generatedCodeType">
-          <el-tab-pane label="Axios" name="axios"></el-tab-pane>
-          <el-tab-pane label="Fetch" name="fetch" disabled></el-tab-pane>
-        </el-tabs>
-        <codemirror v-model="generatedCode" :style="{ height: '400px' }" :autofocus="true" :indent-with-tab="true"
-          :tab-size="2" :extensions="codeGenExtensions" :disabled="true" />
-      </div>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="generateCodeVisible = false">关 闭</el-button>
-          <el-button type="primary" icon="CopyDocument" @click="copyGeneratedCode">复制代码</el-button>
-        </span>
-      </template>
-    </el-dialog>
+    <!-- 隐藏的文件输入框，用于导入 -->
+    <input type="file" ref="importFileRef" style="display: none" @change="handleImportFileChange" accept=".json" />
   </div>
 </template>
 
 <script setup name="ApiManager">
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, reactive, computed, watch, onMounted, nextTick, getCurrentInstance, toRefs } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { Codemirror } from 'vue-codemirror'
 import { json } from '@codemirror/lang-json'
 import { Splitpanes, Pane } from "splitpanes"
 import "splitpanes/dist/splitpanes.css"
-import { javascript } from '@codemirror/lang-javascript'
 import {
   listApiTree,
   getApi,
@@ -478,8 +464,13 @@ import {
   listEnv,
   saveEnvList,
   proxyRequest,
-  listHistory
+  listHistory,
+  exportData,
+  importData
 } from '@/api/dailyTools/apiManage'
+
+// --- Ruoyi Style: 获取全局代理 ---
+const { proxy } = getCurrentInstance()
 
 // --- 状态定义 ---
 const filterText = ref('')
@@ -494,10 +485,8 @@ const responseViewMode = ref('pretty')
 const curlDialogVisible = ref(false)
 const curlInput = ref('')
 const createDialogVisible = ref(false)
-const createFormRef = ref(null)
-const generateCodeVisible = ref(false)
-const generatedCode = ref('')
-const generatedCodeType = ref('axios')
+const importFileRef = ref(null)
+
 const contextMenu = reactive({
   visible: false,
   left: 0,
@@ -517,7 +506,6 @@ const createParentNode = ref(null) // 用于存储新建时的父节点
 
 // Codemirror 扩展
 const extensions = [json()]
-const codeGenExtensions = [javascript()]
 
 // 接口树数据 (模拟)
 const apiTreeData = ref([])
@@ -547,7 +535,8 @@ const getDefaultRequestForm = () => ({
     { active: true, key: '', value: '', desc: '' }
   ],
   bodyType: 'json',
-  bodyJson: '{\n  \n}'
+  bodyJson: '{\n  \n}',
+  responseDef: [] // 修复：确保重置时能清空响应定义
 })
 
 // 请求表单数据
@@ -594,18 +583,21 @@ const getHistory = async () => {
   }
 }
 
-// 新建表单数据
-const createForm = reactive({
-  itemType: 'group',
-  itemName: '',
-  reqMethod: 'GET',
-  reqUrl: ''
+// --- Ruoyi Style: 统一管理数据 ---
+const data = reactive({
+  createForm: {
+    itemType: 'group',
+    itemName: '',
+    reqMethod: 'GET',
+    reqUrl: ''
+  },
+  createRules: {
+    itemName: [{ required: true, message: '请输入名称', trigger: 'blur' }],
+    reqMethod: [{ required: true, message: '请选择请求方式', trigger: 'change' }],
+    reqUrl: [{ required: true, message: '请输入接口地址', trigger: 'blur' }]
+  }
 })
-const createRules = {
-  itemName: [{ required: true, message: '请输入名称', trigger: 'blur' }],
-  reqMethod: [{ required: true, message: '请选择请求方式', trigger: 'change' }],
-  reqUrl: [{ required: true, message: '请输入接口地址', trigger: 'blur' }]
-}
+const { createForm, createRules } = toRefs(data)
 
 // --- 方法实现 ---
 
@@ -697,19 +689,19 @@ const removeEnvRow = (index) => {
 
 const saveEnvConfig = () => {
   if (envList.value.some(e => !e.itemName || !e.itemKey)) {
-    ElMessage.warning('环境名称和Key不能为空')
+    proxy.$modal.msgWarning('环境名称和Key不能为空')
     return
   }
   // 校验 JSON 格式
   try {
     envList.value.forEach(e => e.reqBodyJson && JSON.parse(e.reqBodyJson))
   } catch (e) {
-    ElMessage.warning('变量必须是有效的 JSON 格式')
+    proxy.$modal.msgWarning('变量必须是有效的 JSON 格式')
     return
   }
   saveEnvList(envList.value).then(() => {
     envDialogVisible.value = false
-    ElMessage.success('环境配置已保存')
+    proxy.$modal.msgSuccess('环境配置已保存')
   })
 }
 
@@ -761,13 +753,13 @@ const handleNodeClick = async (data) => {
       // 默认 Header 仅在 getDefaultRequestForm 中初始化，用于新建或重置
     } catch (error) {
       console.error(error)
-      ElMessage.error('获取接口详情失败')
+      proxy.$modal.msgError('获取接口详情失败')
     } finally {
       loading.value = false
     }
   } else {
-    // 修复：点击分组等非API节点时，清空选中状态，防止误操作覆盖上一个接口数据
-    currentNodeId.value = null
+    // 点击分组时，记录ID以便导出，但清空表单防止误编辑
+    currentNodeId.value = data.itemId
     Object.assign(requestForm, getDefaultRequestForm())
     responseDefList.value = []
   }
@@ -783,6 +775,7 @@ const handleWrapperClick = (e) => {
   currentNodeId.value = null
   // 重置右侧表单
   Object.assign(requestForm, getDefaultRequestForm())
+  responseDefList.value = [] // 修复：同时清空响应定义列表
 }
 
 // 表格行操作
@@ -837,7 +830,7 @@ const formatJson = () => {
     const obj = JSON.parse(requestForm.bodyJson)
     requestForm.bodyJson = JSON.stringify(obj, null, 2)
   } catch (e) {
-    ElMessage.warning('JSON 格式错误，无法格式化')
+    proxy.$modal.msgWarning('JSON 格式错误，无法格式化')
   }
 }
 
@@ -866,7 +859,7 @@ const replacePathParams = (url, pathParams) => {
 const handleSend = async () => {
   // 1. 基础校验
   if (!requestForm.url) {
-    ElMessage.warning('请输入接口地址')
+    proxy.$modal.msgWarning('请输入接口地址')
     return
   }
 
@@ -878,7 +871,7 @@ const handleSend = async () => {
       try {
         JSON.parse(jsonStr)
       } catch (e) {
-        ElMessage.warning('Body JSON 格式错误，请检查')
+        proxy.$modal.msgWarning('Body JSON 格式错误，请检查')
         return
       }
     }
@@ -935,9 +928,6 @@ const handleSend = async () => {
   const headersObj = {}
   finalHeaders.forEach(h => headersObj[h.key] = h.value)
 
-  // 创建请求快照 (深拷贝)
-  const snapshot = structuredClone(requestForm)
-
   // --- 真实请求逻辑 (建议) ---
   // 注意：纯前端直接请求会遇到 CORS 跨域问题。
   // 解决方案：通常需要配置 vite/webpack 的 proxy，或者后端提供一个转发接口。
@@ -952,7 +942,9 @@ const handleSend = async () => {
       headers: headersObj,
       params: {}, // Query Params 留空，改为手动拼接到 URL
       body: null, // Request Body
-      bodyType: requestForm.bodyType
+      bodyType: requestForm.bodyType,
+      // 新增：传递UI快照用于历史记录
+      snapshotJson: JSON.stringify(requestForm)
     }
 
     // 处理 Query Params (手动拼接以支持重复 Key，如 ?id=1&id=2)
@@ -1013,10 +1005,10 @@ const handleSend = async () => {
 
     // 3. 结果反馈
     if (actualResponse.status === 0) {
-      ElMessage.error('请求发送失败: ' + (typeof actualResponse.data === 'string' ? actualResponse.data : '网络或代理错误'))
+      proxy.$modal.msgError('请求发送失败: ' + (typeof actualResponse.data === 'string' ? actualResponse.data : '网络或代理错误'))
     } else {
       // 成功或正常的 HTTP 错误响应 (404, 500 等)
-      ElMessage.success(`请求完成 (Status: ${actualResponse.status})`)
+      proxy.$modal.msgSuccess(`请求完成 (Status: ${actualResponse.status})`)
     }
 
     // 刷新历史记录列表 (后端会自动记录)
@@ -1024,7 +1016,7 @@ const handleSend = async () => {
   } catch (error) {
     loading.value = false
     console.error(error)
-    ElMessage.error(error.message || '请求失败')
+    proxy.$modal.msgError(error.message || '请求失败')
     // 也可以记录失败的历史
   }
 }
@@ -1078,24 +1070,24 @@ const parseCurl = () => {
       }
     }
 
-    ElMessage.success('cURL 解析成功')
+    proxy.$modal.msgSuccess('cURL 解析成功')
     curlDialogVisible.value = false
   } catch (e) {
-    ElMessage.error('cURL 解析失败: ' + e.message)
+    proxy.$modal.msgError('cURL 解析失败: ' + e.message)
   }
 }
 
 const handleSave = () => {
   if (!currentNodeId.value) {
-    ElMessage.warning('请先选择一个接口节点')
+    proxy.$modal.msgWarning('请先选择一个接口节点')
     return
   }
   if (!requestForm.itemName) {
-    ElMessage.warning('接口名称不能为空')
+    proxy.$modal.msgWarning('接口名称不能为空')
     return
   }
   if (!requestForm.url) {
-    ElMessage.warning('接口地址不能为空')
+    proxy.$modal.msgWarning('接口地址不能为空')
     return
   }
 
@@ -1118,112 +1110,118 @@ const handleSave = () => {
   }
 
   updateApi(saveData).then(() => {
-    ElMessage.success('接口信息已保存')
+    proxy.$modal.msgSuccess('接口信息已保存')
     getTreeData() // 刷新树
   })
 }
 
-const handleGenerateCode = () => {
-  const { method, url, params, headers, bodyType, bodyJson, pathParams } = requestForm;
-
-  // 修复：生成代码时同样处理绝对路径和 Base URL
-  let finalUrl = ''
-  if (/^https?:\/\//i.test(url)) {
-    finalUrl = url
-  } else {
-    const base = currentBaseUrl.value.replace(/\/$/, '')
-    const path = url.replace(/^\//, '')
-    finalUrl = base ? `${base}/${path}` : url
+const handleExportDoc = (nodeData = null) => {
+  if (!nodeData && !currentNodeId.value) {
+    proxy.$modal.msgWarning('请先选择(或右键点击)要导出的接口或分组')
+    return
   }
 
-  // 替换 Path Params
-  finalUrl = replacePathParams(finalUrl, pathParams);
+  // 递归生成 Markdown 内容
+  const generateMd = (nodes, level = 1) => {
+    let md = ''
+    for (const node of nodes) {
+      const prefix = '#'.repeat(level)
+      md += `${prefix} ${node.itemName}\n\n`
 
-  let code = `import axios from 'axios';\n\n`;
+      if (node.itemType === 'api') {
+        md += `**URL**: \`${node.reqMethod} ${node.reqUrl}\`\n\n`
 
-  // 处理 Params
-  const activeParams = params.filter(p => p.active && p.key);
-  let paramsStr = '';
-  if (activeParams.length > 0) {
-    paramsStr = `params: {\n` + activeParams.map(p => `    '${p.key}': '${p.value}'`).join(',\n') + `\n  },`;
-  }
+        // Params
+        const params = parseJson(node.reqParams)
+        if (params && params.length > 0 && params.some(p => p.active)) {
+          md += `**Query Params**:\n\n`
+          md += `| Key | Value | Description |\n| --- | --- | --- |\n`
+          params.filter(p => p.active).forEach(p => {
+            md += `| ${p.key} | ${p.value} | ${p.desc || '-'} |\n`
+          })
+          md += `\n`
+        }
 
-  // 处理 Headers
-  const activeHeaders = headers.filter(h => h.active && h.key);
-  let headersStr = '';
-  if (activeHeaders.length > 0) {
-    headersStr = `headers: {\n` + activeHeaders.map(h => `    '${h.key}': '${h.value}'`).join(',\n') + `\n  },`;
-  }
+        // Body
+        if (node.reqBodyType === 'json' && node.reqBodyJson) {
+          md += `**Body (JSON)**:\n\`\`\`json\n${node.reqBodyJson}\n\`\`\`\n\n`
+        }
+      }
 
-  // 处理 Body
-  let dataStr = '';
-  if (method.toUpperCase() !== 'GET' && bodyType === 'json' && bodyJson.trim() !== '{}') {
-    try {
-      // 尝试格式化，如果失败则按原样使用
-      const formattedBody = JSON.stringify(JSON.parse(bodyJson), null, 2);
-      dataStr = `data: ${formattedBody},`;
-    } catch (e) {
-      dataStr = `data: ${bodyJson},`;
+      if (node.children && node.children.length > 0) {
+        md += generateMd(node.children, level + 1)
+      }
+      md += `---\n\n`
     }
+    return md
   }
 
-  code += `axios({\n`
-  code += `  method: '${method.toLowerCase()}',\n`
-  code += `  url: '${finalUrl}',\n`
-  if (paramsStr) code += `  ${paramsStr}\n`
-  if (headersStr) code += `  ${headersStr}\n`
-  if (dataStr) code += `  ${dataStr}\n`
-  code += `}).then(res => {\n  console.log(res.data);\n}).catch(err => {\n  console.error(err);\n});`
+  // 查找当前选中的节点对象（树结构）
+  const findNode = (nodes, id) => {
+    for (const node of nodes) {
+      if (node.itemId === id) return node
+      if (node.children) {
+        const found = findNode(node.children, id)
+        if (found) return found
+      }
+    }
+    return null
+  }
 
-  generatedCode.value = code;
-  generateCodeVisible.value = true;
-}
+  let targetNode = nodeData
+  if (!targetNode) {
+    targetNode = findNode(apiTreeData.value, currentNodeId.value)
+  }
 
-const copyGeneratedCode = () => {
-  navigator.clipboard.writeText(generatedCode.value).then(() => {
-    ElMessage.success('代码已复制')
-    generateCodeVisible.value = false
-  }).catch(() => ElMessage.error('复制失败'))
-}
+  if (!targetNode) return
 
-const handleExportDoc = () => {
-  ElMessage.info('文档导出功能开发中...')
+  const markdownContent = generateMd([targetNode])
+
+  // 创建 Blob 并下载
+  const blob = new Blob([markdownContent], { type: 'text/markdown' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `${targetNode.itemName}.md`
+  link.click()
+  URL.revokeObjectURL(link.href)
+
+  proxy.$modal.msgSuccess('文档导出成功')
 }
 
 const restoreHistory = (item) => {
   if (item.snapshotJson) {
     Object.assign(requestForm, JSON.parse(item.snapshotJson))
-    ElMessage.success('已恢复历史参数')
+    proxy.$modal.msgSuccess('已恢复历史参数')
   } else {
     // 兼容旧数据
     requestForm.method = item.reqMethod
     requestForm.url = item.reqUrl.replace(currentBaseUrl.value, '')
-    ElMessage.success('已恢复部分历史参数')
+    proxy.$modal.msgSuccess('已恢复部分历史参数')
   }
 }
 
 const handleCopyResponse = () => {
   if (responseInfo.value && responseInfo.value.data) {
     navigator.clipboard.writeText(responseInfo.value.data).then(() => {
-      ElMessage.success('复制成功')
+      proxy.$modal.msgSuccess('复制成功')
     }).catch(() => {
-      ElMessage.error('复制失败，请手动复制')
+      proxy.$modal.msgError('复制失败，请手动复制')
     })
   }
 }
 
 const handleImportResponse = () => {
   if (!responseInfo.value || !responseInfo.value.data) {
-    ElMessage.warning('暂无响应数据')
+    proxy.$modal.msgWarning('暂无响应数据')
     return
   }
   try {
     const json = parseJson(responseInfo.value.data) // 使用 parseJson 更安全
     responseDefList.value = flattenJson(json)
     activeReqTab.value = 'responseDef'
-    ElMessage.success('响应结构导入成功')
+    proxy.$modal.msgSuccess('响应结构导入成功')
   } catch (e) {
-    ElMessage.error('解析响应JSON失败')
+    proxy.$modal.msgError('解析响应JSON失败')
   }
 }
 
@@ -1257,13 +1255,9 @@ const flattenJson = (obj, prefix = '') => {
 // --- 优化：统一删除逻辑 (供顶部按钮和右键菜单共用) ---
 const execDeleteNode = (node) => {
   const data = node.data
-  ElMessageBox.confirm(`确定要删除 "${data.itemName}" 吗?`, '警告', {
-    confirmButtonText: '确定删除',
-    cancelButtonText: '取消',
-    type: 'warning',
-  }).then(() => {
+  proxy.$modal.confirm(`确定要删除 "${data.itemName}" 吗?`).then(() => {
     delApi(data.itemId).then(() => {
-      ElMessage.success('删除成功')
+      proxy.$modal.msgSuccess('删除成功')
       getTreeData() // 刷新树
       // 如果删除的是当前选中的节点，清空选中状态
       if (currentNodeId.value === data.itemId) {
@@ -1275,7 +1269,7 @@ const execDeleteNode = (node) => {
 }
 
 // 右键菜单处理
-const handleNodeContextMenu = (event, data, node, component) => {
+const handleNodeContextMenu = (event, data, node) => {
   contextMenu.node = node
   contextMenu.visible = true
   contextMenu.left = event.clientX
@@ -1291,7 +1285,7 @@ const handleContextMenu = (action) => {
     case 'addChild':
       // 只有分组可以添加子节点
       if (node.data.itemType === 'api') {
-        ElMessage.warning('接口节点下不能再添加子节点')
+        proxy.$modal.msgWarning('接口节点下不能再添加子节点')
         return
       }
       handleCreate(node)
@@ -1303,7 +1297,7 @@ const handleContextMenu = (action) => {
         inputValue: node.label,
       }).then(({ value }) => {
         updateApi({ itemId: node.data.itemId, itemName: value }).then(() => {
-          ElMessage.success('重命名成功')
+          proxy.$modal.msgSuccess('重命名成功')
           getTreeData()
           // 修复：如果重命名的是当前选中的节点，同步更新右侧表单显示的名称
           if (currentNodeId.value === node.data.itemId) {
@@ -1315,30 +1309,27 @@ const handleContextMenu = (action) => {
     case 'delete':
       execDeleteNode(node)
       break
+    case 'exportDoc':
+      handleExportDoc(node.data)
+      break
   }
 }
 
-const handleDeleteNode = () => {
-  const currentNode = treeRef.value.getCurrentNode()
-  if (!currentNode) {
-    ElMessage.warning('请先选择要删除的节点')
-    return
+// 表单重置
+function reset() {
+  createForm.value = {
+    itemType: 'group',
+    itemName: '',
+    reqMethod: 'GET',
+    reqUrl: ''
   }
-  const node = treeRef.value.getNode(currentNode)
-  execDeleteNode(node)
+  proxy.resetForm("createFormRef")
 }
 
 // 新建逻辑
 const handleCreate = (parentNode = null) => {
-  createForm.itemType = 'group'
-  createForm.itemName = ''
-  createForm.reqMethod = 'GET'
-  createForm.reqUrl = ''
+  reset()
   createDialogVisible.value = true
-
-  nextTick(() => {
-    createFormRef.value?.clearValidate()
-  })
 
   // 如果是从右键菜单“新增子节点”进来，parentNode 是 Node 对象
   if (parentNode && parentNode.data) {
@@ -1349,34 +1340,87 @@ const handleCreate = (parentNode = null) => {
 }
 
 const submitCreate = async () => {
-  if (!createFormRef.value) return
+  if (!proxy.$refs['createFormRef']) return
 
   try {
-    await createFormRef.value.validate()
+    await proxy.$refs['createFormRef'].validate()
   } catch (e) {
     return // 校验失败，停止执行
   }
 
   const postData = {
-    itemName: createForm.itemName,
-    itemType: createForm.itemType,
+    itemName: createForm.value.itemName,
+    itemType: createForm.value.itemType,
     parentId: createParentNode.value ? createParentNode.value.data.itemId : 0
   }
 
-  if (createForm.itemType === 'api') {
-    postData.reqMethod = createForm.reqMethod
-    postData.reqUrl = createForm.reqUrl
+  if (createForm.value.itemType === 'api') {
+    postData.reqMethod = createForm.value.reqMethod
+    postData.reqUrl = createForm.value.reqUrl
   }
 
   try {
     await addApi(postData)
-    ElMessage.success('创建成功')
+    proxy.$modal.msgSuccess('创建成功')
     createDialogVisible.value = false
     getTreeData()
   } catch (e) {
     console.error(e)
     // 发生错误时不关闭弹窗，允许用户重试
   }
+}
+
+// --- 导入导出功能 ---
+
+const handleMoreCommand = (command) => {
+  if (command === 'export') {
+    handleExportAll()
+  } else if (command === 'import') {
+    importFileRef.value.click()
+  }
+}
+
+const handleExportAll = async () => {
+  try {
+    const res = await exportData()
+    const dataStr = JSON.stringify(res.data, null, 2)
+    const blob = new Blob([dataStr], { type: 'application/json' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `api_backup_${new Date().getTime()}.json`
+    link.click()
+    URL.revokeObjectURL(link.href)
+    proxy.$modal.msgSuccess('备份导出成功')
+  } catch (e) {
+    proxy.$modal.msgError('导出失败')
+  }
+}
+
+const handleImportFileChange = (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = async (e) => {
+    try {
+      const json = JSON.parse(e.target.result)
+      await proxy.$modal.confirm('导入将新增接口和环境配置，确定要继续吗？')
+      loading.value = true
+      await importData(json)
+      proxy.$modal.msgSuccess('导入成功')
+      // 刷新数据
+      getTreeData()
+      initEnvs()
+    } catch (err) {
+      if (err === 'cancel') return // 用户点击了取消，静默处理
+      console.error(err)
+      proxy.$modal.msgError('导入失败: ' + (err.message || '文件格式错误'))
+    } finally {
+      loading.value = false
+      importFileRef.value.value = '' // 清空 input，允许重复导入同名文件
+    }
+  }
+  reader.readAsText(file)
 }
 
 // --- 拖拽功能逻辑 ---
@@ -1392,7 +1436,7 @@ const allowDrop = (draggingNode, dropNode, type) => {
 }
 
 // 拖拽完成后的处理
-const handleNodeDrop = (draggingNode, dropNode, dropType, ev) => {
+const handleNodeDrop = (draggingNode, dropNode, dropType) => {
   let newParentId = 0
   if (dropType === 'inner') {
     newParentId = dropNode.data.itemId
@@ -1403,7 +1447,7 @@ const handleNodeDrop = (draggingNode, dropNode, dropType, ev) => {
 
   // 调用后端更新父节点ID
   updateApi({ itemId: draggingNode.data.itemId, parentId: newParentId }).then(() => {
-    ElMessage.success('移动成功')
+    proxy.$modal.msgSuccess('移动成功')
   }).catch(() => {
     getTreeData() // 失败则刷新树，恢复原状
   })
