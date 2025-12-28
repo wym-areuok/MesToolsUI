@@ -5,13 +5,16 @@
       <div class="sidebar-header">
         <span>接口列表</span>
         <div>
-          <el-button type="primary" link icon="Plus" size="small" @click="handleCreate">新建</el-button>
+          <el-button type="primary" link icon="Plus" size="small" @click="handleCreate" v-hasPermi="['dailyTools:apiManage:add']">新建</el-button>
+          <el-tooltip content="快捷请求 (草稿模式)" placement="top">
+            <el-button type="warning" link icon="Lightning" size="small" @click="handleShortcutMode" style="margin-left: 5px"></el-button>
+          </el-tooltip>
           <el-dropdown trigger="click" @command="handleMoreCommand">
             <el-button type="primary" link icon="More" size="small" style="margin-left: 5px"></el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="import" icon="Upload">导入备份</el-dropdown-item>
-                <el-dropdown-item command="export" icon="Download">导出备份</el-dropdown-item>
+                <el-dropdown-item command="import" icon="Upload" v-hasPermi="['dailyTools:apiManage:import']">导入备份</el-dropdown-item>
+                <el-dropdown-item command="export" icon="Download" v-hasPermi="['dailyTools:apiManage:export']">导出备份</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -21,7 +24,7 @@
         <el-input v-model="filterText" placeholder="搜索接口 / URL..." prefix-icon="Search" clearable />
       </div>
       <div class="api-tree-wrapper" @click="handleWrapperClick">
-        <el-tree ref="treeRef" :data="apiTreeData" :props="defaultProps" :expand-on-click-node="false"
+        <el-tree ref="treeRef" :data="apiTreeData" :props="defaultProps" :expand-on-click-node="true"
           :filter-node-method="filterNode" node-key="itemId" highlight-current draggable :allow-drop="allowDrop"
           @node-drop="handleNodeDrop" @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
           <template #default="{ node, data }">
@@ -29,9 +32,10 @@
               <el-tag v-if="data.itemType === 'api'" size="small" :type="getMethodType(data.reqMethod)"
                 class="method-tag">{{
                   data.reqMethod }}</el-tag>
-              <span v-else class="folder-icon"><el-icon>
-                  <Folder />
-                </el-icon></span>
+              <span v-else class="folder-icon">
+                <el-icon v-if="node.expanded"><FolderOpened /></el-icon>
+                <el-icon v-else><Folder /></el-icon>
+              </span>
               <span class="node-label" :title="data.itemName">{{ node.label }}</span>
             </span>
           </template>
@@ -40,16 +44,16 @@
       <!-- 自定义右键菜单 -->
       <div v-if="contextMenu.visible" :style="{ left: contextMenu.left + 'px', top: contextMenu.top + 'px' }"
         class="context-menu">
-        <div class="menu-item" @click="handleContextMenu('addChild')"><el-icon>
+        <div class="menu-item" @click="handleContextMenu('addChild')" v-hasPermi="['dailyTools:apiManage:add']"><el-icon>
             <Plus />
           </el-icon> 新增子节点</div>
-        <div class="menu-item" @click="handleContextMenu('rename')"><el-icon>
+        <div class="menu-item" @click="handleContextMenu('rename')" v-hasPermi="['dailyTools:apiManage:edit']"><el-icon>
             <EditPen />
           </el-icon> 重命名</div>
-        <div class="menu-item" @click="handleContextMenu('exportDoc')"><el-icon>
+        <div class="menu-item" @click="handleContextMenu('exportDoc')" v-hasPermi="['dailyTools:apiManage:export']"><el-icon>
             <Document />
           </el-icon> 导出文档</div>
-        <div class="menu-item danger" @click="handleContextMenu('delete')"><el-icon>
+        <div class="menu-item danger" @click="handleContextMenu('delete')" v-hasPermi="['dailyTools:apiManage:remove']"><el-icon>
             <Delete />
           </el-icon> 删除</div>
       </div>
@@ -61,8 +65,11 @@
     <!-- 右侧主内容区 -->
     <div class="main-content">
       <!-- 顶部工具栏 -->
-      <div class="top-bar">
+      <div class="top-bar" v-loading="loading">
         <el-row :gutter="10" align="middle">
+          <el-col :span="24" v-if="currentMode === 'scratch'" style="margin-bottom: 10px;">
+            <el-alert title="当前为快捷请求模式，数据暂存于本地。点击“保存”可将其添加到接口列表中。" type="warning" show-icon :closable="false" style="padding: 8px;" />
+          </el-col>
           <!-- 环境选择 -->
           <el-col :span="4">
             <div style="display: flex; gap: 5px;">
@@ -103,7 +110,7 @@
           <el-col :span="6">
             <div style="display: flex; justify-content: flex-end; gap: 8px;">
               <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
-              <el-button type="success" plain icon="FolderChecked" @click="handleSave">保存</el-button>
+              <el-button type="success" plain icon="FolderChecked" @click="handleSave" v-hasPermi="['dailyTools:apiManage:add', 'dailyTools:apiManage:edit']">{{ currentMode === 'scratch' ? '另存为' : '保存' }}</el-button>
               <el-button type="info" plain icon="Download" @click="handleCurlImport">cURL</el-button>
             </div>
           </el-col>
@@ -111,7 +118,7 @@
       </div>
 
       <!-- 核心工作区 -->
-      <div class="workspace">
+      <div class="workspace" v-loading="loading">
         <splitpanes class="default-theme">
           <!-- 左侧：请求配置 -->
           <pane :size="60">
@@ -443,12 +450,32 @@
       </template>
     </el-dialog>
 
+    <!-- 另存为弹窗 (快捷请求保存) -->
+    <el-dialog v-model="saveAsDialogVisible" title="保存为新接口" width="500px">
+      <el-form :model="saveAsForm" label-width="80px">
+        <el-form-item label="名称">
+          <el-input v-model="saveAsForm.itemName" placeholder="请输入接口名称" />
+        </el-form-item>
+        <el-form-item label="目标分组">
+          <el-tree-select v-model="saveAsForm.parentId" :data="groupTreeOptions"
+            :props="{ label: 'itemName', value: 'itemId', children: 'children', disabled: 'disabled' }" check-strictly
+            :render-after-expand="false" placeholder="请选择分组 (留空为根目录)" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="saveAsDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitSaveAs">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
     <!-- 隐藏的文件输入框，用于导入 -->
     <input type="file" ref="importFileRef" style="display: none" @change="handleImportFileChange" accept=".json" />
   </div>
 </template>
 
-<script setup name="ApiManager">
+<script setup name="ApiManage">
 import { ref, reactive, computed, watch, onMounted, nextTick, getCurrentInstance, toRefs } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Codemirror } from 'vue-codemirror'
@@ -485,6 +512,9 @@ const responseViewMode = ref('pretty')
 const curlDialogVisible = ref(false)
 const curlInput = ref('')
 const createDialogVisible = ref(false)
+const saveAsDialogVisible = ref(false)
+const currentMode = ref('tree') // 'tree' | 'scratch'
+const saveAsForm = reactive({ parentId: 0, itemName: '' })
 const importFileRef = ref(null)
 
 const contextMenu = reactive({
@@ -514,6 +544,23 @@ const defaultProps = {
   children: 'children',
   label: 'itemName'
 }
+
+// 计算属性：仅包含分组的树结构 (用于另存为选择父节点)
+const groupTreeOptions = computed(() => {
+  const disableApi = (nodes) => {
+    return nodes.map(node => {
+      const newNode = { ...node }
+      if (newNode.itemType === 'api') {
+        newNode.disabled = true // 禁止选择接口作为父节点
+      }
+      if (newNode.children && newNode.children.length > 0) {
+        newNode.children = disableApi(newNode.children)
+      }
+      return newNode
+    })
+  }
+  return disableApi(apiTreeData.value)
+})
 
 // --- 优化：提取默认表单数据工厂函数 ---
 const getDefaultRequestForm = () => ({
@@ -554,8 +601,28 @@ const initEnvs = async () => {
 
 // 获取树数据
 const getTreeData = async () => {
+  // 1. 记录当前展开的节点
+  const expandedKeys = []
+  if (treeRef.value) {
+    const nodesMap = treeRef.value.store.nodesMap
+    for (const key in nodesMap) {
+      if (nodesMap[key].expanded) {
+        expandedKeys.push(key)
+      }
+    }
+  }
+
   const res = await listApiTree()
   apiTreeData.value = res.data || []
+
+  // 2. 恢复展开状态
+  await nextTick()
+  if (treeRef.value) {
+    expandedKeys.forEach(key => {
+      const node = treeRef.value.getNode(key)
+      if (node) node.expanded = true
+    })
+  }
 }
 
 const currentBaseUrl = computed(() => {
@@ -574,10 +641,11 @@ const responseInfo = ref(null)
 const historyList = ref([])
 
 // 获取历史记录
-const getHistory = async () => {
+const getHistory = async (itemId = null) => {
   try {
-    const res = await listHistory()
-    historyList.value = res.data || []
+    const query = itemId ? { itemId } : (currentNodeId.value ? { itemId: currentNodeId.value } : {})
+    const res = await listHistory(query)
+    historyList.value = res.rows || []
   } catch (e) {
     console.error("获取历史记录失败", e)
   }
@@ -716,6 +784,11 @@ const handleNodeClick = async (data) => {
   // 只有点击具体的接口节点（有method属性）才加载数据
   if (data.itemType === 'api') {
     currentNodeId.value = data.itemId
+    currentMode.value = 'tree' // 切换回树模式
+    
+    // 切换节点时，先清空旧的响应和历史，避免混淆
+    responseInfo.value = null
+    historyList.value = []
 
     // 获取最新详情
     try {
@@ -751,6 +824,9 @@ const handleNodeClick = async (data) => {
 
       // 移除此处强制添加默认 Header 的逻辑，避免覆盖用户保存的“无 Header”状态
       // 默认 Header 仅在 getDefaultRequestForm 中初始化，用于新建或重置
+
+      // 加载该接口的历史记录
+      getHistory(data.itemId)
     } catch (error) {
       console.error(error)
       proxy.$modal.msgError('获取接口详情失败')
@@ -760,6 +836,7 @@ const handleNodeClick = async (data) => {
   } else {
     // 点击分组时，记录ID以便导出，但清空表单防止误编辑
     currentNodeId.value = data.itemId
+    currentMode.value = 'tree'
     Object.assign(requestForm, getDefaultRequestForm())
     responseDefList.value = []
   }
@@ -773,9 +850,24 @@ const handleWrapperClick = (e) => {
   // 否则视为点击了空白处，清除选中状态
   treeRef.value.setCurrentKey(null)
   currentNodeId.value = null
+  currentMode.value = 'tree' // 点击空白处也视为回到树模式(未选中状态)
   // 重置右侧表单
   Object.assign(requestForm, getDefaultRequestForm())
   responseDefList.value = [] // 修复：同时清空响应定义列表
+  responseInfo.value = null
+  historyList.value = []
+}
+
+// 切换到快捷请求模式
+const handleShortcutMode = () => {
+  currentMode.value = 'scratch'
+  treeRef.value.setCurrentKey(null)
+  currentNodeId.value = null
+  Object.assign(requestForm, getDefaultRequestForm())
+  responseDefList.value = []
+  responseInfo.value = null
+  historyList.value = []
+  proxy.$modal.msgSuccess('已切换至快捷请求模式')
 }
 
 // 表格行操作
@@ -937,6 +1029,7 @@ const handleSend = async () => {
 
     // 构造代理请求数据
     const proxyPayload = {
+      itemId: currentNodeId.value,
       method: requestForm.method,
       url: finalUrl, // 此时 url 包含 path params，但不包含 query params
       headers: headersObj,
@@ -1077,23 +1170,10 @@ const parseCurl = () => {
   }
 }
 
-const handleSave = () => {
-  if (!currentNodeId.value) {
-    proxy.$modal.msgWarning('请先选择一个接口节点')
-    return
-  }
-  if (!requestForm.itemName) {
-    proxy.$modal.msgWarning('接口名称不能为空')
-    return
-  }
-  if (!requestForm.url) {
-    proxy.$modal.msgWarning('接口地址不能为空')
-    return
-  }
-
-  // 构造保存数据
-  const saveData = {
-    itemId: currentNodeId.value,
+// 提取通用的数据构建逻辑
+const buildApiData = (id) => {
+  return {
+    itemId: id,
     itemName: requestForm.itemName,
     reqUrl: requestForm.url,
     reqMethod: requestForm.method,
@@ -1108,11 +1188,61 @@ const handleSave = () => {
     authType: requestForm.authType,
     authToken: requestForm.authToken
   }
+}
+
+const handleSave = () => {
+  // 快捷模式下，触发另存为
+  if (currentMode.value === 'scratch') {
+    if (!requestForm.url) {
+      proxy.$modal.msgWarning('接口地址不能为空')
+      return
+    }
+    saveAsForm.itemName = requestForm.itemName || '新接口'
+    saveAsForm.parentId = 0
+    saveAsDialogVisible.value = true
+    return
+  }
+
+  // 树模式下，常规保存
+  if (!currentNodeId.value) {
+    proxy.$modal.msgWarning('请先选择一个接口节点')
+    return
+  }
+  if (!requestForm.itemName) {
+    proxy.$modal.msgWarning('接口名称不能为空')
+    return
+  }
+  if (!requestForm.url) {
+    proxy.$modal.msgWarning('接口地址不能为空')
+    return
+  }
+
+  const saveData = buildApiData(currentNodeId.value)
 
   updateApi(saveData).then(() => {
     proxy.$modal.msgSuccess('接口信息已保存')
     getTreeData() // 刷新树
   })
+}
+
+// 提交另存为 (快捷请求 -> 正式接口)
+const submitSaveAs = async () => {
+  if (!saveAsForm.itemName) {
+    proxy.$modal.msgWarning('请输入接口名称')
+    return
+  }
+
+  const postData = buildApiData(0) // ID为0表示新增
+  postData.itemName = saveAsForm.itemName
+  postData.parentId = saveAsForm.parentId || 0
+  postData.itemType = 'api'
+
+  await addApi(postData)
+  proxy.$modal.msgSuccess('保存成功')
+  saveAsDialogVisible.value = false
+  
+  // 刷新树并自动切换回树模式（逻辑在 getTreeData 后续操作中可优化，这里简单刷新即可）
+  getTreeData()
 }
 
 const handleExportDoc = (nodeData = null) => {
@@ -1363,7 +1493,13 @@ const submitCreate = async () => {
     await addApi(postData)
     proxy.$modal.msgSuccess('创建成功')
     createDialogVisible.value = false
-    getTreeData()
+    await getTreeData()
+
+    // 自动展开父节点 (确保能看到刚新增的子节点)
+    if (postData.parentId) {
+      const node = treeRef.value.getNode(postData.parentId)
+      if (node) node.expanded = true
+    }
   } catch (e) {
     console.error(e)
     // 发生错误时不关闭弹窗，允许用户重试
@@ -1456,7 +1592,6 @@ const handleNodeDrop = (draggingNode, dropNode, dropType) => {
 onMounted(() => {
   initEnvs()
   getTreeData()
-  getHistory()
 })
 </script>
 
@@ -1555,12 +1690,16 @@ onMounted(() => {
       color: var(--el-text-color-regular);
     }
 
+    :deep(.el-tree-node__content) {
+      height: 32px; /* 增加行高，点击更舒适 */
+    }
+
     :deep(.el-tree-node__content:hover) {
-      background-color: var(--el-fill-color-light);
+      background-color: var(--el-color-primary-light-9);
     }
 
     :deep(.el-tree-node:focus > .el-tree-node__content) {
-      background-color: var(--el-fill-color-light);
+      background-color: var(--el-color-primary-light-9);
     }
   }
 }
