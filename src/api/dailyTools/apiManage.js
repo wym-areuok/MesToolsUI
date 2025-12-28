@@ -45,6 +45,15 @@ export function delApi(itemId) {
   })
 }
 
+// 锁定/解锁接口
+export function toggleLock(itemId, isLocked) {
+  return request({
+    url: `/dailytools/apiManage/lock/${itemId}/${isLocked}`,
+    method: 'put'
+  })
+}
+
+
 // --- 环境管理 ---
 
 // 查询环境列表

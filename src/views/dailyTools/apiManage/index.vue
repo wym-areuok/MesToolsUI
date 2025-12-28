@@ -5,16 +5,20 @@
       <div class="sidebar-header">
         <span>接口列表</span>
         <div>
-          <el-button type="primary" link icon="Plus" size="small" @click="handleCreate" v-hasPermi="['dailyTools:apiManage:add']">新建</el-button>
+          <el-button type="primary" link icon="Plus" size="small" @click="handleCreate"
+            v-hasPermi="['dailyTools:apiManage:add']">新建</el-button>
           <el-tooltip content="快捷请求 (草稿模式)" placement="top">
-            <el-button type="warning" link icon="Lightning" size="small" @click="handleShortcutMode" style="margin-left: 5px"></el-button>
+            <el-button type="warning" link icon="Lightning" size="small" @click="handleShortcutMode"
+              style="margin-left: 5px"></el-button>
           </el-tooltip>
           <el-dropdown trigger="click" @command="handleMoreCommand">
             <el-button type="primary" link icon="More" size="small" style="margin-left: 5px"></el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="import" icon="Upload" v-hasPermi="['dailyTools:apiManage:import']">导入备份</el-dropdown-item>
-                <el-dropdown-item command="export" icon="Download" v-hasPermi="['dailyTools:apiManage:export']">导出备份</el-dropdown-item>
+                <el-dropdown-item command="import" icon="Upload"
+                  v-hasPermi="['dailyTools:apiManage:import']">导入备份</el-dropdown-item>
+                <el-dropdown-item command="export" icon="Download"
+                  v-hasPermi="['dailyTools:apiManage:export']">导出备份</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -33,9 +37,16 @@
                 class="method-tag">{{
                   data.reqMethod }}</el-tag>
               <span v-else class="folder-icon">
-                <el-icon v-if="node.expanded"><FolderOpened /></el-icon>
-                <el-icon v-else><Folder /></el-icon>
+                <el-icon v-if="node.expanded">
+                  <FolderOpened />
+                </el-icon>
+                <el-icon v-else>
+                  <Folder />
+                </el-icon>
               </span>
+              <el-icon v-if="data.isLocked" class="lock-icon" title="已锁定">
+                <Lock />
+              </el-icon>
               <span class="node-label" :title="data.itemName">{{ node.label }}</span>
             </span>
           </template>
@@ -44,18 +55,30 @@
       <!-- 自定义右键菜单 -->
       <div v-if="contextMenu.visible" :style="{ left: contextMenu.left + 'px', top: contextMenu.top + 'px' }"
         class="context-menu">
-        <div class="menu-item" @click="handleContextMenu('addChild')" v-hasPermi="['dailyTools:apiManage:add']"><el-icon>
+        <div class="menu-item" @click="handleContextMenu('addChild')" v-hasPermi="['dailyTools:apiManage:add']">
+          <el-icon>
             <Plus />
-          </el-icon> 新增子节点</div>
+          </el-icon> 新增子节点
+        </div>
         <div class="menu-item" @click="handleContextMenu('rename')" v-hasPermi="['dailyTools:apiManage:edit']"><el-icon>
             <EditPen />
           </el-icon> 重命名</div>
-        <div class="menu-item" @click="handleContextMenu('exportDoc')" v-hasPermi="['dailyTools:apiManage:export']"><el-icon>
+        <div class="menu-item" @click="handleContextMenu('toggleLock')" v-hasPermi="['dailyTools:apiManage:edit']">
+          <el-icon>
+            <component :is="contextMenu.node && contextMenu.node.data.isLocked ? 'Unlock' : 'Lock'" />
+          </el-icon>
+          {{ contextMenu.node && contextMenu.node.data.isLocked ? '解锁' : '锁定' }}
+        </div>
+        <div class="menu-item" @click="handleContextMenu('exportDoc')" v-hasPermi="['dailyTools:apiManage:export']">
+          <el-icon>
             <Document />
-          </el-icon> 导出文档</div>
-        <div class="menu-item danger" @click="handleContextMenu('delete')" v-hasPermi="['dailyTools:apiManage:remove']"><el-icon>
+          </el-icon> 导出文档
+        </div>
+        <div class="menu-item danger" @click="handleContextMenu('delete')" v-hasPermi="['dailyTools:apiManage:remove']">
+          <el-icon>
             <Delete />
-          </el-icon> 删除</div>
+          </el-icon> 删除
+        </div>
       </div>
       <div v-if="contextMenu.visible" class="context-menu-mask" @click="contextMenu.visible = false"
         @contextmenu.prevent="contextMenu.visible = false">
@@ -68,7 +91,12 @@
       <div class="top-bar" v-loading="loading">
         <el-row :gutter="10" align="middle">
           <el-col :span="24" v-if="currentMode === 'scratch'" style="margin-bottom: 10px;">
-            <el-alert title="当前为快捷请求模式，数据暂存于本地。点击“保存”可将其添加到接口列表中。" type="warning" show-icon :closable="false" style="padding: 8px;" />
+            <el-alert title="当前为快捷请求模式，数据暂存于本地。点击“保存”可将其添加到接口列表中。" type="warning" show-icon :closable="false"
+              style="padding: 8px;" />
+          </el-col>
+          <el-col :span="24" v-if="currentMode === 'tree' && requestForm.isLocked" style="margin-bottom: 10px;">
+            <el-alert title="此接口已被锁定，无法进行编辑和删除操作。如需修改，请先在左侧树右键解锁。" type="info" show-icon :closable="false"
+              style="padding: 8px;" />
           </el-col>
           <!-- 环境选择 -->
           <el-col :span="4">
@@ -83,11 +111,13 @@
 
           <!-- URL 输入区 -->
           <el-col :span="14">
-            <div style="display: flex; gap: 10px;">
-              <el-input v-model="requestForm.itemName" placeholder="接口名称" style="width: 180px" />
-              <el-input v-model="requestForm.url" :placeholder="urlPlaceholder" style="flex: 1">
+            <div style="display: flex; gap: 10px;" :class="{ 'locked-form': requestForm.isLocked }">
+              <el-input v-model="requestForm.itemName" placeholder="接口名称" style="width: 180px"
+                :disabled="requestForm.isLocked" />
+              <el-input v-model="requestForm.url" :placeholder="urlPlaceholder" style="flex: 1"
+                :disabled="requestForm.isLocked">
                 <template #prepend>
-                  <el-select v-model="requestForm.method" style="width: 105px">
+                  <el-select v-model="requestForm.method" style="width: 105px" :disabled="requestForm.isLocked">
                     <el-option label="GET" value="GET">
                       <span style="color: var(--el-color-success); font-weight: bold">GET</span>
                     </el-option>
@@ -110,7 +140,10 @@
           <el-col :span="6">
             <div style="display: flex; justify-content: flex-end; gap: 8px;">
               <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
-              <el-button type="success" plain icon="FolderChecked" @click="handleSave" v-hasPermi="['dailyTools:apiManage:add', 'dailyTools:apiManage:edit']">{{ currentMode === 'scratch' ? '另存为' : '保存' }}</el-button>
+              <el-button type="success" plain icon="FolderChecked" @click="handleSave"
+                v-hasPermi="['dailyTools:apiManage:add', 'dailyTools:apiManage:edit']"
+                :disabled="requestForm.isLocked">{{
+                  currentMode === 'scratch' ? '另存为' : '保存' }}</el-button>
               <el-button type="info" plain icon="Download" @click="handleCurlImport">cURL</el-button>
             </div>
           </el-col>
@@ -126,17 +159,17 @@
               <el-tabs v-model="activeReqTab" class="custom-tabs">
                 <el-tab-pane label="Auth" name="auth">
                   <div class="panel-content">
-                    <div class="section-desc">Authorization (鉴权)</div>
+                    <div class="section-desc" :class="{ 'locked-form': requestForm.isLocked }">Authorization (鉴权)</div>
                     <el-form label-position="top" size="small">
                       <el-form-item label="Type">
-                        <el-select v-model="requestForm.authType" style="width: 200px">
+                        <el-select v-model="requestForm.authType" style="width: 200px" :disabled="requestForm.isLocked">
                           <el-option label="No Auth" value="none" />
                           <el-option label="Bearer Token" value="bearer" />
                         </el-select>
                       </el-form-item>
                       <el-form-item label="Token" v-if="requestForm.authType === 'bearer'">
                         <el-input v-model="requestForm.authToken" type="textarea" :rows="3"
-                          placeholder="请输入 Token 或变量 {{token}}" />
+                          :disabled="requestForm.isLocked" placeholder="请输入 Token 或变量 {{token}}" />
                         <div
                           style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 8px; line-height: 1.5;">
                           <el-icon style="vertical-align: -2px; margin-right: 4px">
@@ -158,12 +191,12 @@
                         <el-table-column label="Key" width="200" prop="key" />
                         <el-table-column label="Value" width="200">
                           <template #default="scope">
-                            <el-input v-model="scope.row.value" placeholder="Value" />
+                            <el-input v-model="scope.row.value" placeholder="Value" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
                         <el-table-column label="Description">
                           <template #default="scope">
-                            <el-input v-model="scope.row.desc" placeholder="描述" />
+                            <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
                       </el-table>
@@ -172,40 +205,41 @@
                     <el-table :data="requestForm.params" style="width: 100%" size="small" border>
                       <el-table-column width="50" align="center">
                         <template #default="scope">
-                          <el-checkbox v-model="scope.row.active" />
+                          <el-checkbox v-model="scope.row.active" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                       <el-table-column label="Key" width="200">
                         <template #default="scope">
-                          <el-input v-model="scope.row.key" placeholder="Key" />
+                          <el-input v-model="scope.row.key" placeholder="Key" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                       <el-table-column label="Value" width="200">
                         <template #default="scope">
                           <el-autocomplete v-model="scope.row.value"
                             :fetch-suggestions="(qs, cb) => queryHeaderValueSearch(scope.row, qs, cb)"
-                            placeholder="Value" style="width: 100%" />
+                            placeholder="Value" style="width: 100%" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                       <el-table-column label="Description">
                         <template #default="scope">
-                          <el-input v-model="scope.row.desc" placeholder="描述" />
+                          <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                       <el-table-column width="50" align="center">
                         <template #default="scope">
                           <el-button link type="danger" icon="Delete"
-                            @click="removeRow(requestForm.params, scope.$index)" />
+                            @click="removeRow(requestForm.params, scope.$index)" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                     </el-table>
-                    <el-button link type="primary" icon="Plus" @click="addRow(requestForm.params)">添加参数</el-button>
+                    <el-button link type="primary" icon="Plus" @click="addRow(requestForm.params)"
+                      :disabled="requestForm.isLocked">添加参数</el-button>
                   </div>
                 </el-tab-pane>
 
                 <el-tab-pane label="Headers" name="headers">
                   <div class="panel-content">
-                    <div class="section-desc">Request Headers</div>
+                    <div class="section-desc" :class="{ 'locked-form': requestForm.isLocked }">Request Headers</div>
                     <el-table :data="requestForm.headers" style="width: 100%" size="small" border>
                       <el-table-column width="50" align="center">
                         <template #default="scope">
@@ -215,27 +249,28 @@
                       <el-table-column label="Key" width="200">
                         <template #default="scope">
                           <el-autocomplete v-model="scope.row.key" :fetch-suggestions="queryHeaderSearch"
-                            placeholder="Key" style="width: 100%" />
+                            :disabled="requestForm.isLocked" placeholder="Key" style="width: 100%" />
                         </template>
                       </el-table-column>
                       <el-table-column label="Value" width="200">
                         <template #default="scope">
-                          <el-input v-model="scope.row.value" placeholder="Value" />
+                          <el-input v-model="scope.row.value" placeholder="Value" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                       <el-table-column label="Description">
                         <template #default="scope">
-                          <el-input v-model="scope.row.desc" placeholder="描述" />
+                          <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                       <el-table-column width="50" align="center">
                         <template #default="scope">
                           <el-button link type="danger" icon="Delete"
-                            @click="removeRow(requestForm.headers, scope.$index)" />
+                            @click="removeRow(requestForm.headers, scope.$index)" :disabled="requestForm.isLocked" />
                         </template>
                       </el-table-column>
                     </el-table>
-                    <el-button link type="primary" icon="Plus" @click="addRow(requestForm.headers)">添加
+                    <el-button link type="primary" icon="Plus" @click="addRow(requestForm.headers)"
+                      :disabled="requestForm.isLocked">添加
                       Header</el-button>
                   </div>
                 </el-tab-pane>
@@ -243,42 +278,46 @@
                 <el-tab-pane label="Body" name="body">
                   <div class="panel-content body-content">
                     <div class="body-toolbar">
-                      <el-radio-group v-model="requestForm.bodyType" size="small">
+                      <el-radio-group v-model="requestForm.bodyType" size="small" :disabled="requestForm.isLocked">
                         <el-radio-button label="none">none</el-radio-button>
                         <el-radio-button label="json">raw (json)</el-radio-button>
                         <el-radio-button label="form">form-data</el-radio-button>
                       </el-radio-group>
-                      <el-button link type="primary" size="small" @click="formatJson">格式化 JSON</el-button>
+                      <el-button link type="primary" size="small" @click="formatJson"
+                        :disabled="requestForm.isLocked">格式化
+                        JSON</el-button>
                     </div>
                     <div class="editor-wrapper" v-if="requestForm.bodyType === 'json'">
                       <codemirror v-model="requestForm.bodyJson" placeholder="请输入 JSON..." :style="{ height: '100%' }"
-                        :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="extensions" />
+                        :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="extensions"
+                        :disabled="requestForm.isLocked" />
                     </div>
                     <div v-else-if="requestForm.bodyType === 'form'" class="panel-content" style="padding-top: 0;">
                       <el-table :data="requestForm.formData" style="width: 100%" size="small" border>
                         <el-table-column width="50" align="center">
                           <template #default="scope">
-                            <el-checkbox v-model="scope.row.active" />
+                            <el-checkbox v-model="scope.row.active" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
                         <el-table-column label="Key" width="200">
                           <template #default="scope">
-                            <el-input v-model="scope.row.key" placeholder="Key" />
+                            <el-input v-model="scope.row.key" placeholder="Key" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
                         <el-table-column label="Value">
                           <template #default="scope">
-                            <el-input v-model="scope.row.value" placeholder="Value" />
+                            <el-input v-model="scope.row.value" placeholder="Value" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
                         <el-table-column width="50" align="center">
                           <template #default="scope">
-                            <el-button link type="danger" icon="Delete"
+                            <el-button link type="danger" icon="Delete" :disabled="requestForm.isLocked"
                               @click="removeRow(requestForm.formData, scope.$index)" />
                           </template>
                         </el-table-column>
                       </el-table>
-                      <el-button link type="primary" icon="Plus" @click="addRow(requestForm.formData)">添加参数</el-button>
+                      <el-button link type="primary" icon="Plus" @click="addRow(requestForm.formData)"
+                        :disabled="requestForm.isLocked">添加参数</el-button>
                     </div>
                     <div v-else-if="requestForm.bodyType === 'none'" class="empty-tip">
                       该请求没有 Body 数据
@@ -493,7 +532,8 @@ import {
   proxyRequest,
   listHistory,
   exportData,
-  importData
+  importData,
+  toggleLock
 } from '@/api/dailyTools/apiManage'
 
 // --- Ruoyi Style: 获取全局代理 ---
@@ -583,7 +623,8 @@ const getDefaultRequestForm = () => ({
   ],
   bodyType: 'json',
   bodyJson: '{\n  \n}',
-  responseDef: [] // 修复：确保重置时能清空响应定义
+  responseDef: [], // 修复：确保重置时能清空响应定义
+  isLocked: 0
 })
 
 // 请求表单数据
@@ -785,7 +826,7 @@ const handleNodeClick = async (data) => {
   if (data.itemType === 'api') {
     currentNodeId.value = data.itemId
     currentMode.value = 'tree' // 切换回树模式
-    
+
     // 切换节点时，先清空旧的响应和历史，避免混淆
     responseInfo.value = null
     historyList.value = []
@@ -805,6 +846,7 @@ const handleNodeClick = async (data) => {
       requestForm.url = apiData.reqUrl
       requestForm.method = apiData.reqMethod
 
+
       // JSON 字段解析
       requestForm.params = parseJson(apiData.reqParams)
       requestForm.headers = parseJson(apiData.reqHeaders)
@@ -817,6 +859,7 @@ const handleNodeClick = async (data) => {
       if (apiData.reqBodyJson) requestForm.bodyJson = apiData.reqBodyJson
       if (apiData.authType) requestForm.authType = apiData.authType
       if (apiData.authToken) requestForm.authToken = apiData.authToken
+      if (apiData.isLocked) requestForm.isLocked = apiData.isLocked
 
       // 兼容处理：如果 responseDef 解析出来是空的，赋值为空数组
       if (!requestForm.responseDef) responseDefList.value = []
@@ -1186,7 +1229,8 @@ const buildApiData = (id) => {
     reqBodyType: requestForm.bodyType,
     reqBodyJson: requestForm.bodyJson,
     authType: requestForm.authType,
-    authToken: requestForm.authToken
+    authToken: requestForm.authToken,
+    isLocked: requestForm.isLocked
   }
 }
 
@@ -1200,6 +1244,12 @@ const handleSave = () => {
     saveAsForm.itemName = requestForm.itemName || '新接口'
     saveAsForm.parentId = 0
     saveAsDialogVisible.value = true
+    return
+  }
+
+  // 安全检查：如果已锁定，禁止保存
+  if (requestForm.isLocked) {
+    proxy.$modal.msgWarning('当前接口已被锁定，无法修改')
     return
   }
 
@@ -1240,7 +1290,7 @@ const submitSaveAs = async () => {
   await addApi(postData)
   proxy.$modal.msgSuccess('保存成功')
   saveAsDialogVisible.value = false
-  
+
   // 刷新树并自动切换回树模式（逻辑在 getTreeData 后续操作中可优化，这里简单刷新即可）
   getTreeData()
 }
@@ -1441,6 +1491,13 @@ const handleContextMenu = (action) => {
       break
     case 'exportDoc':
       handleExportDoc(node.data)
+      break
+    case 'toggleLock':
+      const newLockState = node.data.isLocked ? 0 : 1
+      toggleLock(node.data.itemId, newLockState).then(() => {
+        proxy.$modal.msgSuccess(newLockState ? '锁定成功' : '解锁成功')
+        getTreeData()
+      })
       break
   }
 }
@@ -1691,7 +1748,8 @@ onMounted(() => {
     }
 
     :deep(.el-tree-node__content) {
-      height: 32px; /* 增加行高，点击更舒适 */
+      height: 32px;
+      /* 增加行高，点击更舒适 */
     }
 
     :deep(.el-tree-node__content:hover) {
@@ -1729,6 +1787,11 @@ onMounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .lock-icon {
+    margin-left: 4px;
+    color: var(--el-color-warning);
+  }
 }
 
 /* 主内容区 */
@@ -1742,6 +1805,11 @@ onMounted(() => {
     padding: 10px 15px;
     background-color: var(--el-bg-color);
     border-bottom: 1px solid var(--el-border-color);
+  }
+
+  .locked-form {
+    opacity: 0.6;
+    pointer-events: none;
   }
 
   .workspace {
