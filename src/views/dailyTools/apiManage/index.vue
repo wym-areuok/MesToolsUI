@@ -63,7 +63,7 @@
         <div class="menu-item" @click="handleContextMenu('rename')" v-hasPermi="['dailyTools:apiManage:edit']"><el-icon>
             <EditPen />
           </el-icon> 重命名</div>
-        <div class="menu-item" @click="handleContextMenu('toggleLock')" v-hasPermi="['dailyTools:apiManage:edit']">
+        <div class="menu-item" @click="handleContextMenu('toggleLock')" v-hasPermi="['dailyTools:apiManage:lock']">
           <el-icon>
             <component :is="contextMenu.node && contextMenu.node.data.isLocked ? 'Unlock' : 'Lock'" />
           </el-icon>
