@@ -39,7 +39,7 @@
                 </el-icon> 快捷入口</span>
             </div>
           </template>
-          <el-row :gutter="20">
+          <el-row :gutter="20" v-if="filteredToolList.length > 0">
             <el-col :xs="12" :sm="8" :md="8" :lg="6" v-for="(tool, index) in filteredToolList" :key="index"
               class="mb-20" v-hasPermi="tool.permissions">
               <div class="tool-item" @click="handleNav(tool.path)">
@@ -58,6 +58,7 @@
               </div>
             </el-col>
           </el-row>
+          <el-empty v-else description="未找到相关工具" :image-size="100" />
         </el-card>
       </el-col>
 
@@ -171,14 +172,14 @@ const toolList = reactive([
     path: '/dailyTools/stringTool',
     bgColor: '#909399',
     permissions: ['dailyTools:stringTool:execute']
-  }, {
+  },
+  {
     title: '接口管理',
     desc: '接口信息查询和发送',
-    icon: 'Search',
+    icon: 'Connection',
     path: '/dailyTools/apiManage',
     bgColor: '#4285F4',
-    permissions: ['dailyTools:apiManage:list'],
-    count: 0
+    permissions: ['dailyTools:apiManage:list']
   }
 ])
 
@@ -337,6 +338,10 @@ function handleGlobalSearch() {
       border-color: #ebeef5;
     }
 
+    &:hover .tool-icon {
+      transform: scale(1.1) rotate(5deg);
+    }
+
     .tool-icon {
       width: 48px;
       height: 48px;
@@ -346,6 +351,7 @@ function handleGlobalSearch() {
       justify-content: center;
       margin-right: 15px;
       flex-shrink: 0;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
 
     .tool-info {

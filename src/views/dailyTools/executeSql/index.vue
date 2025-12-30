@@ -145,6 +145,9 @@ const {
   rules
 } = toRefs(data)
 
+// 智能识别SQL类型的正则 (提取到外部避免重复创建)
+const SMART_EXECUTE_REGEX = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE)\b/gi;
+
 /** 获取需要执行的SQL (选中内容或全部内容) */
 function getSqlToExecute() {
   if (editorView.value) {
@@ -162,9 +165,8 @@ function handleSmartExecute() {
   const { sql: rawSql } = getSqlToExecute();
   const sql = rawSql?.replace(/\uFEFF/g, '').trim();
   if (!sql) return;
-  // 使用正则提取第一个有效关键字 (忽略注释、字符串、方括号)
-  const tokenRegex = /(--[^\r\n]*)|(\/\*[\s\S]*?\*\/)|(N?'(?:''|[^'])*')|(\[[^\]]*\])|\b(SELECT|UPDATE|INSERT|DELETE)\b/gi;
-  const matches = [...sql.matchAll(tokenRegex)];
+  // 使用正则提取第一个有效关键字 (忽略注释、字符串、方括号) - 使用外部常量
+  const matches = [...sql.matchAll(SMART_EXECUTE_REGEX)];
   let firstKeyword = null;
   for (const match of matches) {
     if (!match[1] && !match[2] && !match[3] && !match[4]) {
@@ -345,6 +347,10 @@ function addLog(type, success, time, sql, message = '') {
     message,
     timestamp: new Date().toLocaleString()
   });
+  // 限制日志数量，防止内存溢出
+  if (executionLogs.value.length > 50) {
+    executionLogs.value.pop();
+  }
 }
 
 /** 清理结果区域 */

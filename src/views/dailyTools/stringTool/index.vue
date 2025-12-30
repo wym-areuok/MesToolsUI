@@ -434,7 +434,12 @@ const handleFileSuccess = (response, file, fileList) => {
   upload.isUploading = false;
   if (response.code === 200) {
     upload.open = false;
-    proxy.$modal.msgSuccess("文件上传成功，正在后台处理，请稍后查看处理结果");
+    if (response.data) {
+      formData.output = response.data;
+      proxy.$modal.msgSuccess("文件处理成功");
+    } else {
+      proxy.$modal.msgSuccess("文件上传成功，正在后台处理");
+    }
   } else {
     upload.open = false;
     proxy.$modal.msgError(response.msg || "文件上传失败");

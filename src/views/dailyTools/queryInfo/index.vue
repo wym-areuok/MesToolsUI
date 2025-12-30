@@ -130,7 +130,7 @@
                   <el-form-item label="状态" prop="status">
                      <el-radio-group v-model="form.status">
                         <el-radio v-for="dict in info_status" :key="dict.value" :value="dict.value">{{ dict.label
-                        }}</el-radio>
+                           }}</el-radio>
                      </el-radio-group>
                   </el-form-item>
                </el-col>
@@ -389,16 +389,13 @@ function handleDelete(row) {
       proxy.$modal.msgWarning("请选择要删除的资料");
       return;
    }
+   const count = Array.isArray(infoIds) ? infoIds.length : 1;
    proxy.$modal
-      .confirm(DELETE_CONFIRM_MSG(infoIds.length))
+      .confirm(DELETE_CONFIRM_MSG(count))
       .then(async () => {
          try {
-            // 兼容批量删除API
-            if (Array.isArray(infoIds)) {
-               await Promise.all(infoIds.map((id) => deleteInfo(id)));
-            } else {
-               await deleteInfo(infoIds);
-            }
+            const idsStr = Array.isArray(infoIds) ? infoIds.join(',') : infoIds;
+            await deleteInfo(idsStr);
             proxy.$modal.msgSuccess("删除成功");
             getList();
          } catch (error) {

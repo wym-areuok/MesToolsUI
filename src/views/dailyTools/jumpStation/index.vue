@@ -154,8 +154,7 @@ const data = reactive({
     dbDataSource: [...dbDataSourceRules],
     jumpType: [...jumpTypeRules],
     station: [...stationRules],
-    remark: [...remarkRules],
-    sfc: []
+    remark: [...remarkRules]
   }
 });
 
@@ -262,7 +261,6 @@ function resetValidationRules() {
   rules.value.jumpType = [...jumpTypeRules];
   rules.value.station = [...stationRules];
   rules.value.remark = [...remarkRules];
-  rules.value.sfc = [];
   // 恢复特定规则的初始状态
   rules.value.station[0].required = false; // 查询时站点非必需
   rules.value.remark[0].required = false;  // 查询时备注非必需

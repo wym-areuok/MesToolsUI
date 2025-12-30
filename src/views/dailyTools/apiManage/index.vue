@@ -379,7 +379,8 @@
                         :disabled="true" />
                     </div>
                     <div class="editor-wrapper" v-else-if="responseInfo && responseViewMode === 'preview'">
-                      <iframe :srcdoc="responseInfo.data" style="width: 100%; height: 100%; border: none;"></iframe>
+                      <iframe :srcdoc="responseInfo.data" sandbox="allow-scripts"
+                        style="width: 100%; height: 100%; border: none;"></iframe>
                     </div>
                     <el-empty v-else description="点击发送查看响应" :image-size="80" />
                   </div>
@@ -1497,6 +1498,10 @@ const handleContextMenu = (action) => {
       toggleLock(node.data.itemId, newLockState).then(() => {
         proxy.$modal.msgSuccess(newLockState ? '锁定成功' : '解锁成功')
         getTreeData()
+        // 如果操作的是当前选中的节点，同步更新右侧表单的锁定状态
+        if (currentNodeId.value === node.data.itemId) {
+          requestForm.isLocked = newLockState
+        }
       })
       break
   }

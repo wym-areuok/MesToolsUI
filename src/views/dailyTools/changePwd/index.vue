@@ -17,7 +17,7 @@
             </el-select>
           </el-form-item>
           <el-form-item label="密码" prop="customPwd">
-            <el-input v-model="formData.customPwd" type="password" placeholder="默认密码123" :maxlength="7" show-word-limit
+            <el-input v-model="formData.customPwd" type="password" placeholder="默认密码123" :maxlength="20" show-word-limit
               clearable show-password :style="{ width: '100%' }"></el-input>
           </el-form-item>
           <el-form-item>
@@ -34,8 +34,7 @@
 </template>
 
 <script setup name="ChangePwd">
-import { ref, reactive, onMounted } from 'vue'
-import { getCurrentInstance, toRefs } from 'vue'
+import { ref, reactive, onMounted, getCurrentInstance, toRefs, nextTick } from 'vue'
 import { changeCurrentPwd, changeOtherPwd } from '@/api/dailyTools/changePwd'
 import useUserStore from '@/store/modules/user'
 import { getInfo } from '@/api/login'
@@ -47,8 +46,6 @@ const userStore = useUserStore()
 const currentBtnLoading = ref(false)
 const otherBtnLoading = ref(false)
 
-// 定义校验规则常量
-const loginFisNoRules = []
 const otherFisNoRules = [
   {
     required: true,
@@ -81,15 +78,11 @@ const data = reactive({
   },
   // 固定的校验规则对象
   rules: {
-    loginFisNo: [...loginFisNoRules],
-    otherFisNo: [...otherFisNoRules],
+    otherFisNo: [], // 默认为空，点击按钮时动态设置，避免污染常量
     dbDataSource: [...dbDataSourceRules],
     customPwd: [...customPwdRules],
   }
 })
-
-// 初始化时设置校验规则状态
-data.rules.otherFisNo[0].required = false  // 修改当前时 其他工号非必需
 
 const { formData, rules } = toRefs(data)
 
@@ -97,16 +90,20 @@ const { formData, rules } = toRefs(data)
 function submitForm(type) {
   // 根据操作类型设置对应的校验规则
   if (type === 'other') {
-    // 修改其他用户时 其他工号为必需
-    rules.value.otherFisNo[0].required = true
+    // 修改其他用户时 启用完整规则(包含必填和正则)
+    rules.value.otherFisNo = [...otherFisNoRules]
   } else {
-    // 修改当前用户时 其他工号非必需
-    rules.value.otherFisNo[0].required = false
+    // 修改当前用户时 清空其他工号规则，防止正则校验阻碍提交
+    rules.value.otherFisNo = []
+    // 显式清除其他工号的验证状态，防止残留错误提示
+    formRef.value?.clearValidate('otherFisNo')
   }
-  // 执行表单校验
-  formRef.value.validate((valid) => {
-    if (!valid) return
-    performSubmit(type)
+  // 执行表单校验 - 使用nextTick确保规则更新生效
+  nextTick(() => {
+    formRef.value.validate((valid) => {
+      if (!valid) return
+      performSubmit(type)
+    })
   })
 }
 
@@ -146,27 +143,22 @@ function performSubmit(type) {
 /** 表单重置 */
 function resetForm() {
   formRef.value.resetFields()
-  formData.value.otherFisNo = ''
-  formData.value.customPwd = '123'
   // 重置所有校验规则到初始状态
   resetValidationRules()
   // 清除表单验证状态
-  setTimeout(() => {
+  nextTick(() => {
     if (formRef.value) {
       formRef.value.clearValidate()
     }
-  }, 10)
+  })
 }
 
 /** 重置校验规则到初始状态-不要使用两套单独校验规则切换 否则重置会有问题 */
 function resetValidationRules() {
   // 重置所有校验规则
-  rules.value.loginFisNo = [...loginFisNoRules]
-  rules.value.otherFisNo = [...otherFisNoRules]
+  rules.value.otherFisNo = [] // 重置为空，等待用户点击按钮选择模式
   rules.value.dbDataSource = [...dbDataSourceRules]
   rules.value.customPwd = [...customPwdRules]
-  // 恢复特定规则的初始状态
-  rules.value.otherFisNo[0].required = false  // 其他工号默认非必需
 }
 
 /** 获取当前用户FIS账号 */
