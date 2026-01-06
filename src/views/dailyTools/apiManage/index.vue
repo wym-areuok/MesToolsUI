@@ -6,7 +6,7 @@
         <span>接口列表</span>
         <div>
           <el-button type="primary" link icon="Plus" size="small" @click="handleCreate"
-            v-hasPermi="['dailyTools:apiManage:add']">新建</el-button>
+            v-hasPermi="['dailyTools:apiManage:insert']">新建</el-button>
           <el-tooltip content="快捷请求 (草稿模式)" placement="top">
             <el-button type="warning" link icon="Lightning" size="small" @click="handleShortcutMode"
               style="margin-left: 5px"></el-button>
@@ -55,7 +55,7 @@
       <!-- 自定义右键菜单 -->
       <div v-if="contextMenu.visible" :style="{ left: contextMenu.left + 'px', top: contextMenu.top + 'px' }"
         class="context-menu">
-        <div class="menu-item" @click="handleContextMenu('addChild')" v-hasPermi="['dailyTools:apiManage:add']">
+        <div class="menu-item" @click="handleContextMenu('addChild')" v-hasPermi="['dailyTools:apiManage:insert']">
           <el-icon>
             <Plus />
           </el-icon> 新增子节点
@@ -141,7 +141,7 @@
             <div style="display: flex; justify-content: flex-end; gap: 8px;">
               <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
               <el-button type="success" plain icon="FolderChecked" @click="handleSave"
-                v-hasPermi="['dailyTools:apiManage:add', 'dailyTools:apiManage:edit']"
+                v-hasPermi="['dailyTools:apiManage:insert', 'dailyTools:apiManage:edit']"
                 :disabled="requestForm.isLocked">{{
                   currentMode === 'scratch' ? '另存为' : '保存' }}</el-button>
               <el-button type="info" plain icon="Download" @click="handleCurlImport">cURL</el-button>
