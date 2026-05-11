@@ -1,27 +1,11 @@
 <template>
   <div class="api-manager-container">
-    <!-- 左侧侧边栏：接口树 -->
     <div class="sidebar">
       <div class="sidebar-header">
         <span>接口列表</span>
         <div>
           <el-button type="primary" link icon="Plus" size="small" @click="handleCreate"
             v-hasPermi="['dailyTools:apiManage:insert']">新建</el-button>
-          <el-tooltip content="快捷请求 (草稿模式)" placement="top">
-            <el-button type="warning" link icon="Lightning" size="small" @click="handleShortcutMode"
-              style="margin-left: 5px"></el-button>
-          </el-tooltip>
-          <el-dropdown trigger="click" @command="handleMoreCommand">
-            <el-button type="primary" link icon="More" size="small" style="margin-left: 5px"></el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="import" icon="Upload"
-                  v-hasPermi="['dailyTools:apiManage:import']">导入备份</el-dropdown-item>
-                <el-dropdown-item command="export" icon="Download"
-                  v-hasPermi="['dailyTools:apiManage:export']">导出备份</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
         </div>
       </div>
       <div class="sidebar-search">
@@ -34,8 +18,9 @@
           <template #default="{ node, data }">
             <span class="custom-tree-node">
               <el-tag v-if="data.itemType === 'api'" size="small" :type="getMethodType(data.reqMethod)"
-                class="method-tag">{{
-                  data.reqMethod }}</el-tag>
+                class="method-tag">
+                {{ data.reqMethod }}
+              </el-tag>
               <span v-else class="folder-icon">
                 <el-icon v-if="node.expanded">
                   <FolderOpened />
@@ -85,215 +70,63 @@
       </div>
     </div>
 
-    <!-- 右侧主内容区 -->
-    <div class="main-content">
-      <!-- 顶部工具栏 -->
-      <div class="top-bar" v-loading="loading">
-        <el-row :gutter="10" align="middle">
-          <el-col :span="24" v-if="currentMode === 'scratch'" style="margin-bottom: 10px;">
-            <el-alert title="当前为快捷请求模式，数据暂存于本地。点击“保存”可将其添加到接口列表中。" type="warning" show-icon :closable="false"
-              style="padding: 8px;" />
-          </el-col>
-          <el-col :span="24" v-if="currentMode === 'tree' && requestForm.isLocked" style="margin-bottom: 10px;">
-            <el-alert title="此接口已被锁定，无法进行编辑和删除操作。如需修改，请先在左侧树右键解锁。" type="info" show-icon :closable="false"
-              style="padding: 8px;" />
-          </el-col>
-          <!-- 环境选择 -->
-          <el-col :span="4">
-            <div style="display: flex; gap: 5px;">
-              <el-select v-model="currentItemKey" placeholder="选择环境" style="width: 100%" clearable>
-                <el-option label="未设定 (自定义)" value="" />
-                <el-option v-for="env in envList" :key="env.itemKey" :label="env.itemName" :value="env.itemKey" />
-              </el-select>
-              <el-button icon="Setting" circle @click="openEnvManager" title="环境管理" />
-            </div>
-          </el-col>
-
-          <!-- URL 输入区 -->
-          <el-col :span="14">
-            <div style="display: flex; gap: 10px;" :class="{ 'locked-form': requestForm.isLocked }">
-              <el-input v-model="requestForm.itemName" placeholder="接口名称" style="width: 180px"
-                :disabled="requestForm.isLocked" />
-              <el-input v-model="requestForm.url" :placeholder="urlPlaceholder" style="flex: 1"
-                :disabled="requestForm.isLocked">
-                <template #prepend>
-                  <el-select v-model="requestForm.method" style="width: 105px" :disabled="requestForm.isLocked">
-                    <el-option label="GET" value="GET">
-                      <span style="color: var(--el-color-success); font-weight: bold">GET</span>
-                    </el-option>
-                    <el-option label="POST" value="POST">
-                      <span style="color: var(--el-color-warning); font-weight: bold">POST</span>
-                    </el-option>
-                    <el-option label="PUT" value="PUT">
-                      <span style="color: var(--el-color-primary); font-weight: bold">PUT</span>
-                    </el-option>
-                    <el-option label="DELETE" value="DELETE">
-                      <span style="color: var(--el-color-danger); font-weight: bold">DELETE</span>
-                    </el-option>
-                  </el-select>
-                </template>
-              </el-input>
-            </div>
-          </el-col>
-
-          <!-- 操作按钮 -->
-          <el-col :span="6">
-            <div style="display: flex; justify-content: flex-end; gap: 8px;">
-              <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
-              <el-button type="success" plain icon="FolderChecked" @click="handleSave"
-                v-hasPermi="['dailyTools:apiManage:insert', 'dailyTools:apiManage:edit']"
-                :disabled="requestForm.isLocked">{{
-                  currentMode === 'scratch' ? '另存为' : '保存' }}</el-button>
-              <el-button type="info" plain icon="Download" @click="handleCurlImport">cURL</el-button>
-            </div>
-          </el-col>
-        </el-row>
-      </div>
-
-      <!-- 核心工作区 -->
-      <div class="workspace" v-loading="loading">
-        <splitpanes class="default-theme">
-          <!-- 左侧：请求配置 -->
-          <pane :size="60">
-            <div class="request-panel">
-              <el-tabs v-model="activeReqTab" class="custom-tabs">
-                <el-tab-pane label="Auth" name="auth">
-                  <div class="panel-content">
-                    <div class="section-desc" :class="{ 'locked-form': requestForm.isLocked }">Authorization (鉴权)</div>
-                    <el-form label-position="top" size="small">
-                      <el-form-item label="Type">
-                        <el-select v-model="requestForm.authType" style="width: 200px" :disabled="requestForm.isLocked">
-                          <el-option label="No Auth" value="none" />
-                          <el-option label="Bearer Token" value="bearer" />
+    <div class="main-content" v-loading="loading">
+      <template v-if="currentNodeType === 'api'">
+        <div class="workspace">
+          <splitpanes class="default-theme">
+            <pane :size="60">
+              <div class="request-panel">
+                <div class="request-header-bar">
+                  <el-alert v-if="requestForm.isLocked" title="接口已锁定" type="info" :closable="false" show-icon
+                    style="margin-bottom: 10px; padding: 5px 10px;" />
+                  <div class="url-input-container" :class="{ 'locked-form': requestForm.isLocked }">
+                    <el-input v-model="requestForm.url" :placeholder="urlPlaceholder" :disabled="requestForm.isLocked">
+                      <template #prepend>
+                        <el-select v-model="requestForm.method" style="width: 100px" :disabled="requestForm.isLocked">
+                          <el-option label="GET" value="GET"><span
+                              style="color: var(--el-color-success); font-weight: bold">GET</span></el-option>
+                          <el-option label="POST" value="POST"><span
+                              style="color: var(--el-color-warning); font-weight: bold">POST</span></el-option>
+                          <el-option label="PUT" value="PUT"><span
+                              style="color: var(--el-color-primary); font-weight: bold">PUT</span></el-option>
+                          <el-option label="DELETE" value="DELETE"><span
+                              style="color: var(--el-color-danger); font-weight: bold">DELETE</span></el-option>
                         </el-select>
-                      </el-form-item>
-                      <el-form-item label="Token" v-if="requestForm.authType === 'bearer'">
-                        <el-input v-model="requestForm.authToken" type="textarea" :rows="3"
-                          :disabled="requestForm.isLocked" placeholder="请输入 Token 或变量 {{token}}" />
-                        <div
-                          style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 8px; line-height: 1.5;">
-                          <el-icon style="vertical-align: -2px; margin-right: 4px">
-                            <InfoFilled />
-                          </el-icon>
-                          <span>发送请求时，以此处填写的内容为准。若填写 <span v-pre>{{token}}</span>，则会自动替换为当前环境中的变量值。</span>
-                        </div>
-                      </el-form-item>
-                    </el-form>
-                  </div>
-                </el-tab-pane>
-                <el-tab-pane label="Params" name="params">
-                  <div class="panel-content">
-                    <!-- Path Variables 区域 -->
-                    <div v-if="requestForm.pathParams.length > 0">
-                      <div class="section-desc">Path Variables (路径参数)</div>
-                      <el-table :data="requestForm.pathParams" style="width: 100%; margin-bottom: 15px;" size="small"
-                        border>
-                        <el-table-column label="Key" width="200" prop="key" />
-                        <el-table-column label="Value" width="200">
-                          <template #default="scope">
-                            <el-input v-model="scope.row.value" placeholder="Value" :disabled="requestForm.isLocked" />
-                          </template>
-                        </el-table-column>
-                        <el-table-column label="Description">
-                          <template #default="scope">
-                            <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
-                          </template>
-                        </el-table-column>
-                      </el-table>
+                      </template>
+                    </el-input>
+                    <div class="action-buttons">
+                      <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
+                      <el-button type="success" plain icon="FolderChecked" @click="handleSave"
+                        v-hasPermi="['dailyTools:apiManage:insert', 'dailyTools:apiManage:edit']"
+                        :disabled="requestForm.isLocked">保存</el-button>
                     </div>
-                    <div class="section-desc">Query Params (URL 参数)</div>
-                    <el-table :data="requestForm.params" style="width: 100%" size="small" border>
-                      <el-table-column width="50" align="center">
-                        <template #default="scope">
-                          <el-checkbox v-model="scope.row.active" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="Key" width="200">
-                        <template #default="scope">
-                          <el-input v-model="scope.row.key" placeholder="Key" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="Value" width="200">
-                        <template #default="scope">
-                          <el-autocomplete v-model="scope.row.value"
-                            :fetch-suggestions="(qs, cb) => queryHeaderValueSearch(scope.row, qs, cb)"
-                            placeholder="Value" style="width: 100%" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="Description">
-                        <template #default="scope">
-                          <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column width="50" align="center">
-                        <template #default="scope">
-                          <el-button link type="danger" icon="Delete"
-                            @click="removeRow(requestForm.params, scope.$index)" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                    </el-table>
-                    <el-button link type="primary" icon="Plus" @click="addRow(requestForm.params)"
-                      :disabled="requestForm.isLocked">添加参数</el-button>
                   </div>
-                </el-tab-pane>
+                </div>
 
-                <el-tab-pane label="Headers" name="headers">
-                  <div class="panel-content">
-                    <div class="section-desc" :class="{ 'locked-form': requestForm.isLocked }">Request Headers</div>
-                    <el-table :data="requestForm.headers" style="width: 100%" size="small" border>
-                      <el-table-column width="50" align="center">
-                        <template #default="scope">
-                          <el-checkbox v-model="scope.row.active" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="Key" width="200">
-                        <template #default="scope">
-                          <el-autocomplete v-model="scope.row.key" :fetch-suggestions="queryHeaderSearch"
-                            :disabled="requestForm.isLocked" placeholder="Key" style="width: 100%" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="Value" width="200">
-                        <template #default="scope">
-                          <el-input v-model="scope.row.value" placeholder="Value" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="Description">
-                        <template #default="scope">
-                          <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                      <el-table-column width="50" align="center">
-                        <template #default="scope">
-                          <el-button link type="danger" icon="Delete"
-                            @click="removeRow(requestForm.headers, scope.$index)" :disabled="requestForm.isLocked" />
-                        </template>
-                      </el-table-column>
-                    </el-table>
-                    <el-button link type="primary" icon="Plus" @click="addRow(requestForm.headers)"
-                      :disabled="requestForm.isLocked">添加
-                      Header</el-button>
-                  </div>
-                </el-tab-pane>
-
-                <el-tab-pane label="Body" name="body">
-                  <div class="panel-content body-content">
-                    <div class="body-toolbar">
-                      <el-radio-group v-model="requestForm.bodyType" size="small" :disabled="requestForm.isLocked">
-                        <el-radio-button label="none">none</el-radio-button>
-                        <el-radio-button label="json">raw (json)</el-radio-button>
-                        <el-radio-button label="form">form-data</el-radio-button>
-                      </el-radio-group>
-                      <el-button link type="primary" size="small" @click="formatJson"
-                        :disabled="requestForm.isLocked">格式化
-                        JSON</el-button>
-                    </div>
-                    <div class="editor-wrapper" v-if="requestForm.bodyType === 'json'">
-                      <codemirror v-model="requestForm.bodyJson" placeholder="请输入 JSON..." :style="{ height: '100%' }"
-                        :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="extensions"
-                        :disabled="requestForm.isLocked" />
-                    </div>
-                    <div v-else-if="requestForm.bodyType === 'form'" class="panel-content" style="padding-top: 0;">
-                      <el-table :data="requestForm.formData" style="width: 100%" size="small" border>
+                <el-tabs v-model="activeReqTab" class="custom-tabs">
+                  <el-tab-pane label="Params" name="params">
+                    <div class="panel-content">
+                      <!-- Path Variables 区域 -->
+                      <div v-if="requestForm.pathParams.length > 0">
+                        <div class="section-desc">Path Variables (路径参数)</div>
+                        <el-table :data="requestForm.pathParams" style="width: 100%; margin-bottom: 15px;" size="small"
+                          border>
+                          <el-table-column label="Key" width="200" prop="key" />
+                          <el-table-column label="Value" width="200">
+                            <template #default="scope">
+                              <el-input v-model="scope.row.value" placeholder="Value"
+                                :disabled="requestForm.isLocked" />
+                            </template>
+                          </el-table-column>
+                          <el-table-column label="Description">
+                            <template #default="scope">
+                              <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                      </div>
+                      <div class="section-desc">Query Params (URL 参数)</div>
+                      <el-table :data="requestForm.params" style="width: 100%" size="small" border>
                         <el-table-column width="50" align="center">
                           <template #default="scope">
                             <el-checkbox v-model="scope.row.active" :disabled="requestForm.isLocked" />
@@ -304,118 +137,201 @@
                             <el-input v-model="scope.row.key" placeholder="Key" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
-                        <el-table-column label="Value">
+                        <el-table-column label="Value" width="200">
                           <template #default="scope">
-                            <el-input v-model="scope.row.value" placeholder="Value" :disabled="requestForm.isLocked" />
+                            <el-autocomplete v-model="scope.row.value"
+                              :fetch-suggestions="(qs, cb) => queryHeaderValueSearch(scope.row, qs, cb)"
+                              placeholder="Value" style="width: 100%" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
-                        <el-table-column width="50" align="center">
+                        <el-table-column label="Description">
                           <template #default="scope">
-                            <el-button link type="danger" icon="Delete" :disabled="requestForm.isLocked"
-                              @click="removeRow(requestForm.formData, scope.$index)" />
-                          </template>
-                        </el-table-column>
-                      </el-table>
-                      <el-button link type="primary" icon="Plus" @click="addRow(requestForm.formData)"
-                        :disabled="requestForm.isLocked">添加参数</el-button>
-                    </div>
-                    <div v-else-if="requestForm.bodyType === 'none'" class="empty-tip">
-                      该请求没有 Body 数据
-                    </div>
-                  </div>
-                </el-tab-pane>
-
-                <el-tab-pane label="响应定义" name="responseDef">
-                  <div class="panel-content">
-                    <div v-if="responseDefList.length > 0">
-                      <el-table :data="responseDefList" style="width: 100%" size="small" border>
-                        <el-table-column label="字段名" prop="key" width="180" />
-                        <el-table-column label="类型" prop="type" width="100" />
-                        <el-table-column label="备注">
-                          <template #default="scope">
-                            <el-input v-model="scope.row.desc" placeholder="请输入备注" size="small" />
+                            <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
                         <el-table-column width="50" align="center">
                           <template #default="scope">
                             <el-button link type="danger" icon="Delete"
-                              @click="removeRow(responseDefList, scope.$index)" />
+                              @click="removeRow(requestForm.params, scope.$index)" :disabled="requestForm.isLocked" />
                           </template>
                         </el-table-column>
                       </el-table>
+                      <el-button link type="primary" icon="Plus" @click="addRow(requestForm.params)"
+                        :disabled="requestForm.isLocked">添加参数</el-button>
                     </div>
-                    <div v-else>
-                      <el-empty description="暂无响应定义，可从右侧响应结果导入" :image-size="80" />
-                    </div>
-                  </div>
-                </el-tab-pane>
-              </el-tabs>
-            </div>
-          </pane>
+                  </el-tab-pane>
 
-          <!-- 右侧：响应结果 -->
-          <pane :size="40">
-            <div class="response-panel">
-              <el-tabs v-model="activeResTab" class="custom-tabs">
-                <el-tab-pane label="当前响应" name="response">
-                  <div class="panel-content response-content">
-                    <div class="response-meta" v-if="responseInfo">
-                      <el-tag :type="responseInfo.status === 200 ? 'success' : 'danger'" effect="dark" size="small">
-                        {{ responseInfo.status }} {{ responseInfo.statusText }}
-                      </el-tag>
-                      <span class="meta-item">耗时: {{ responseInfo.time }}ms</span>
-                      <span class="meta-item">大小: {{ responseInfo.size }}</span>
-                      <el-button type="primary" link size="small" style="margin-left: auto;"
-                        @click="handleCopyResponse">复制</el-button>
-                      <el-button type="primary" link size="small" @click="handleImportResponse">导入为响应结构</el-button>
-                      <el-divider direction="vertical" />
-                      <el-radio-group v-model="responseViewMode" size="small">
-                        <el-radio-button label="pretty">Pretty</el-radio-button>
-                        <el-radio-button label="preview">Preview</el-radio-button>
-                      </el-radio-group>
+                  <el-tab-pane label="Headers" name="headers">
+                    <div class="panel-content">
+                      <div class="section-desc" :class="{ 'locked-form': requestForm.isLocked }">Request Headers</div>
+                      <el-table :data="requestForm.headers" style="width: 100%" size="small" border>
+                        <el-table-column width="50" align="center">
+                          <template #default="scope">
+                            <el-checkbox v-model="scope.row.active" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="Key" width="200">
+                          <template #default="scope">
+                            <el-autocomplete v-model="scope.row.key" :fetch-suggestions="queryHeaderSearch"
+                              :disabled="requestForm.isLocked" placeholder="Key" style="width: 100%" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="Value" width="200">
+                          <template #default="scope">
+                            <el-input v-model="scope.row.value" placeholder="Value" :disabled="requestForm.isLocked" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="Description">
+                          <template #default="scope">
+                            <el-input v-model="scope.row.desc" placeholder="描述" :disabled="requestForm.isLocked" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column width="50" align="center">
+                          <template #default="scope">
+                            <el-button link type="danger" icon="Delete"
+                              @click="removeRow(requestForm.headers, scope.$index)" :disabled="requestForm.isLocked" />
+                          </template>
+                        </el-table-column>
+                      </el-table>
+                      <el-button link type="primary" icon="Plus" @click="addRow(requestForm.headers)"
+                        :disabled="requestForm.isLocked">添加
+                        Header</el-button>
                     </div>
-                    <div class="editor-wrapper" v-if="responseInfo && responseViewMode === 'pretty'">
-                      <codemirror v-model="responseInfo.data" :style="{ height: '100%' }" :extensions="extensions"
-                        :disabled="true" />
+                  </el-tab-pane>
+
+                  <el-tab-pane label="Body" name="body">
+                    <div class="panel-content body-content">
+                      <div class="body-toolbar">
+                        <el-radio-group v-model="requestForm.bodyType" size="small" :disabled="requestForm.isLocked">
+                          <el-radio-button label="none">none</el-radio-button>
+                          <el-radio-button label="json">raw (json)</el-radio-button>
+                          <el-radio-button label="form">form-data</el-radio-button>
+                        </el-radio-group>
+                        <el-button link type="primary" size="small" @click="formatJson"
+                          :disabled="requestForm.isLocked">格式化
+                          JSON</el-button>
+                      </div>
+                      <div class="editor-wrapper" v-if="requestForm.bodyType === 'json'">
+                        <codemirror v-model="requestForm.bodyJson" placeholder="请输入 JSON..." :style="{ height: '100%' }"
+                          :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="extensions"
+                          :disabled="requestForm.isLocked" />
+                      </div>
+                      <div v-else-if="requestForm.bodyType === 'form'" class="panel-content" style="padding-top: 0;">
+                        <el-table :data="requestForm.formData" style="width: 100%" size="small" border>
+                          <el-table-column width="50" align="center">
+                            <template #default="scope">
+                              <el-checkbox v-model="scope.row.active" :disabled="requestForm.isLocked" />
+                            </template>
+                          </el-table-column>
+                          <el-table-column label="Key" width="200">
+                            <template #default="scope">
+                              <el-input v-model="scope.row.key" placeholder="Key" :disabled="requestForm.isLocked" />
+                            </template>
+                          </el-table-column>
+                          <el-table-column label="Value">
+                            <template #default="scope">
+                              <el-input v-model="scope.row.value" placeholder="Value"
+                                :disabled="requestForm.isLocked" />
+                            </template>
+                          </el-table-column>
+                          <el-table-column width="50" align="center">
+                            <template #default="scope">
+                              <el-button link type="danger" icon="Delete" :disabled="requestForm.isLocked"
+                                @click="removeRow(requestForm.formData, scope.$index)" />
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                        <el-button link type="primary" icon="Plus" @click="addRow(requestForm.formData)"
+                          :disabled="requestForm.isLocked">添加参数</el-button>
+                      </div>
+                      <div v-else-if="requestForm.bodyType === 'none'" class="empty-tip">
+                        该请求没有 Body 数据
+                      </div>
                     </div>
-                    <div class="editor-wrapper" v-else-if="responseInfo && responseViewMode === 'preview'">
-                      <iframe :srcdoc="responseInfo.data" sandbox="allow-scripts"
-                        style="width: 100%; height: 100%; border: none;"></iframe>
+                  </el-tab-pane>
+
+                  <el-tab-pane label="响应定义" name="responseDef">
+                    <div class="panel-content">
+                      <div v-if="responseDefList.length > 0">
+                        <el-table :data="responseDefList" style="width: 100%" size="small" border>
+                          <el-table-column label="字段名" prop="key" width="180" />
+                          <el-table-column label="类型" prop="type" width="100" />
+                          <el-table-column label="备注">
+                            <template #default="scope">
+                              <el-input v-model="scope.row.desc" placeholder="请输入备注" size="small" />
+                            </template>
+                          </el-table-column>
+                          <el-table-column width="50" align="center">
+                            <template #default="scope">
+                              <el-button link type="danger" icon="Delete"
+                                @click="removeRow(responseDefList, scope.$index)" />
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                      </div>
+                      <div v-else>
+                        <el-empty description="暂无响应定义，可从右侧响应结果导入" :image-size="80" />
+                      </div>
                     </div>
-                    <el-empty v-else description="点击发送查看响应" :image-size="80" />
-                  </div>
-                </el-tab-pane>
-                <el-tab-pane label="测试历史" name="history">
-                  <div class="panel-content">
-                    <el-timeline style="padding: 10px;">
-                      <el-timeline-item v-for="(item, index) in historyList" :key="index"
-                        :type="item.resStatus === 200 ? 'success' : 'danger'" :timestamp="item.createTime"
-                        placement="top">
-                        <el-card class="history-card" shadow="hover" @click="restoreHistory(item)">
-                          <h4>{{ item.reqMethod }} {{ item.reqUrl }}</h4>
-                          <p>状态: {{ item.resStatus }} | 耗时: {{ item.duration }}ms</p>
-                        </el-card>
-                      </el-timeline-item>
-                    </el-timeline>
-                  </div>
-                </el-tab-pane>
-              </el-tabs>
+                  </el-tab-pane>
+                </el-tabs>
+              </div>
+            </pane>
+
+            <pane :size="40">
+              <div class="response-panel">
+                <el-tabs v-model="activeResTab" class="custom-tabs">
+                  <el-tab-pane label="当前响应" name="response">
+                    <div class="panel-content response-content">
+                      <div class="response-meta" v-if="responseInfo">
+                        <el-tag :type="responseInfo.status === 200 ? 'success' : 'danger'" effect="dark" size="small">
+                          {{ responseInfo.status }} {{ responseInfo.statusText }}
+                        </el-tag>
+                        <span class="meta-item">耗时: {{ responseInfo.time }}ms</span>
+                        <span class="meta-item">大小: {{ responseInfo.size }}</span>
+                        <el-button type="primary" link size="small" style="margin-left: auto;"
+                          @click="handleCopyResponse">复制</el-button>
+                        <el-button type="primary" link size="small" @click="handleImportResponse">导入为响应结构</el-button>
+                        <el-divider direction="vertical" />
+                        <el-radio-group v-model="responseViewMode" size="small">
+                          <el-radio-button label="pretty">Pretty</el-radio-button>
+                          <el-radio-button label="preview">Preview</el-radio-button>
+                        </el-radio-group>
+                      </div>
+                      <div class="editor-wrapper" v-if="responseInfo && responseViewMode === 'pretty'">
+                        <codemirror v-model="responseInfo.data" :style="{ height: '100%' }" :extensions="extensions"
+                          :disabled="true" />
+                      </div>
+                      <div class="editor-wrapper" v-else-if="responseInfo && responseViewMode === 'preview'">
+                        <iframe :srcdoc="responseInfo.data" sandbox="allow-scripts"
+                          style="width: 100%; height: 100%; border: none;"></iframe>
+                      </div>
+                      <el-empty v-else description="点击发送查看响应" :image-size="80" />
+                    </div>
+                  </el-tab-pane>
+                </el-tabs>
+              </div>
+            </pane>
+          </splitpanes>
+        </div>
+      </template>
+
+      <!-- 初始化样式 / 分组选中时的空白表单占位 -->
+      <div v-else class="empty-workspace">
+        <el-empty description="请从左侧接口树中选择一个接口进行调试" :image-size="200">
+          <template #extra>
+            <div class="init-tip">
+              <p><el-icon>
+                  <InfoFilled />
+                </el-icon> 您可以点击左侧“新建”按钮创建新的接口或分组</p>
+              <p><el-icon>
+                  <Mouse />
+                </el-icon> 右键点击树节点可进行重命名、锁定或导出文档等操作</p>
             </div>
-          </pane>
-        </splitpanes>
+          </template>
+        </el-empty>
       </div>
     </div>
-
-    <!-- cURL 导入弹窗 -->
-    <el-dialog v-model="curlDialogVisible" title="导入 cURL" width="600px">
-      <el-input v-model="curlInput" type="textarea" :rows="8" placeholder="请粘贴 cURL 命令..." />
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="curlDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="parseCurl">解析并填充</el-button>
-        </span>
-      </template>
-    </el-dialog>
 
     <!-- 新建接口/分组弹窗 -->
     <el-dialog v-model="createDialogVisible" title="新建" width="500px">
@@ -438,7 +354,7 @@
             </el-select>
           </el-form-item>
           <el-form-item label="接口地址" prop="reqUrl">
-            <el-input v-model="createForm.reqUrl" placeholder="/path/to/api" />
+            <el-input v-model="createForm.reqUrl" placeholder="address/path/to/api" />
           </el-form-item>
         </template>
       </el-form>
@@ -449,69 +365,6 @@
         </span>
       </template>
     </el-dialog>
-
-    <!-- 环境管理弹窗 -->
-    <el-dialog v-model="envDialogVisible" title="环境管理" width="600px">
-      <el-table :data="envList" border stripe>
-        <el-table-column prop="itemName" label="环境名称">
-          <template #default="{ row }">
-            <el-input v-model="row.itemName" placeholder="如: 测试环境" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="itemKey" label="Key (唯一)">
-          <template #default="{ row }">
-            <el-input v-model="row.itemKey" placeholder="如: test" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="reqUrl" label="Base URL">
-          <template #default="{ row }">
-            <el-input v-model="row.reqUrl" placeholder="http://..." />
-          </template>
-        </el-table-column>
-        <el-table-column prop="reqBodyJson" label="环境变量 (JSON)">
-          <template #default="{ row }">
-            <el-input v-model="row.reqBodyJson" placeholder='{"token": "..."}' />
-          </template>
-        </el-table-column>
-        <el-table-column width="60" align="center">
-          <template #header>
-            <el-button link type="primary" icon="Plus" @click="addEnvRow"></el-button>
-          </template>
-          <template #default="{ $index }">
-            <el-button link type="danger" icon="Delete" @click="removeEnvRow($index)"></el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="envDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="saveEnvConfig">保存</el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 另存为弹窗 (快捷请求保存) -->
-    <el-dialog v-model="saveAsDialogVisible" title="保存为新接口" width="500px">
-      <el-form :model="saveAsForm" label-width="80px">
-        <el-form-item label="名称">
-          <el-input v-model="saveAsForm.itemName" placeholder="请输入接口名称" />
-        </el-form-item>
-        <el-form-item label="目标分组">
-          <el-tree-select v-model="saveAsForm.parentId" :data="groupTreeOptions"
-            :props="{ label: 'itemName', value: 'itemId', children: 'children', disabled: 'disabled' }" check-strictly
-            :render-after-expand="false" placeholder="请选择分组 (留空为根目录)" style="width: 100%" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="saveAsDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="submitSaveAs">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 隐藏的文件输入框，用于导入 -->
-    <input type="file" ref="importFileRef" style="display: none" @change="handleImportFileChange" accept=".json" />
   </div>
 </template>
 
@@ -528,12 +381,7 @@ import {
   addApi,
   updateApi,
   delApi,
-  listEnv,
-  saveEnvList,
   proxyRequest,
-  listHistory,
-  exportData,
-  importData,
   toggleLock
 } from '@/api/dailyTools/apiManage'
 
@@ -543,20 +391,10 @@ const { proxy } = getCurrentInstance()
 // --- 状态定义 ---
 const filterText = ref('')
 const treeRef = ref(null)
-const currentItemKey = ref('')
 const loading = ref(false)
-const envDialogVisible = ref(false)
-const envList = ref([])
-const activeReqTab = ref('auth')
-const activeResTab = ref('response')
+const activeReqTab = ref('params')
 const responseViewMode = ref('pretty')
-const curlDialogVisible = ref(false)
-const curlInput = ref('')
 const createDialogVisible = ref(false)
-const saveAsDialogVisible = ref(false)
-const currentMode = ref('tree') // 'tree' | 'scratch'
-const saveAsForm = reactive({ parentId: 0, itemName: '' })
-const importFileRef = ref(null)
 
 const contextMenu = reactive({
   visible: false,
@@ -573,37 +411,15 @@ const nodeTypeOptions = [
 ]
 
 const currentNodeId = ref(null) // 记录当前选中的节点ID
+const currentNodeType = ref(null) // 记录当前选中的节点类型 (api 或 group)
 const createParentNode = ref(null) // 用于存储新建时的父节点
-
-// Codemirror 扩展
 const extensions = [json()]
-
-// 接口树数据 (模拟)
 const apiTreeData = ref([])
-
 const defaultProps = {
   children: 'children',
   label: 'itemName'
 }
 
-// 计算属性：仅包含分组的树结构 (用于另存为选择父节点)
-const groupTreeOptions = computed(() => {
-  const disableApi = (nodes) => {
-    return nodes.map(node => {
-      const newNode = { ...node }
-      if (newNode.itemType === 'api') {
-        newNode.disabled = true // 禁止选择接口作为父节点
-      }
-      if (newNode.children && newNode.children.length > 0) {
-        newNode.children = disableApi(newNode.children)
-      }
-      return newNode
-    })
-  }
-  return disableApi(apiTreeData.value)
-})
-
-// --- 优化：提取默认表单数据工厂函数 ---
 const getDefaultRequestForm = () => ({
   itemName: '',
   method: 'GET',
@@ -617,31 +433,15 @@ const getDefaultRequestForm = () => ({
     { active: true, key: 'Content-Type', value: 'application/json', desc: '' },
     { active: true, key: 'User-Agent', value: 'MesTools/1.0', desc: '' }
   ],
-  authType: 'none',
-  authToken: '',
   formData: [
     { active: true, key: '', value: '', desc: '' }
   ],
   bodyType: 'json',
   bodyJson: '{\n  \n}',
-  responseDef: [], // 修复：确保重置时能清空响应定义
   isLocked: 0
 })
-
-// 请求表单数据
 const requestForm = reactive(getDefaultRequestForm())
 
-// 环境配置初始化
-const initEnvs = async () => {
-  try {
-    const res = await listEnv()
-    envList.value = res.data || []
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-// 获取树数据
 const getTreeData = async () => {
   // 1. 记录当前展开的节点
   const expandedKeys = []
@@ -667,33 +467,11 @@ const getTreeData = async () => {
   }
 }
 
-const currentBaseUrl = computed(() => {
-  const env = envList.value.find(e => e.itemKey === currentItemKey.value)
-  return env ? env.reqUrl : ''
-})
-
-const urlPlaceholder = computed(() => {
-  return currentItemKey.value ? '请输入接口路径 (如 /system/user)' : '请输入完整接口地址 (如 http://localhost/api...)'
-})
+const urlPlaceholder = ref('请输入完整接口地址 (如 http://localhost/api...)')
 
 // 响应信息
 const responseInfo = ref(null)
 
-// 历史记录
-const historyList = ref([])
-
-// 获取历史记录
-const getHistory = async (itemId = null) => {
-  try {
-    const query = itemId ? { itemId } : (currentNodeId.value ? { itemId: currentNodeId.value } : {})
-    const res = await listHistory(query)
-    historyList.value = res.rows || []
-  } catch (e) {
-    console.error("获取历史记录失败", e)
-  }
-}
-
-// --- Ruoyi Style: 统一管理数据 ---
 const data = reactive({
   createForm: {
     itemType: 'group',
@@ -708,10 +486,6 @@ const data = reactive({
   }
 })
 const { createForm, createRules } = toRefs(data)
-
-// --- 方法实现 ---
-
-// 树节点过滤
 watch(filterText, (val) => {
   treeRef.value.filter(val)
 })
@@ -721,7 +495,6 @@ const filterNode = (value, data) => {
   return data.itemName.includes(value) || (data.reqUrl && data.reqUrl.includes(value))
 }
 
-// 获取请求方法对应的 Tag 类型
 const getMethodType = (method) => {
   const map = {
     GET: 'success',
@@ -731,39 +504,6 @@ const getMethodType = (method) => {
   }
   return map[method] || 'info'
 }
-
-// 监听 Auth Type 变化，自动填充默认变量
-watch(() => requestForm.authType, (val) => {
-  if (val === 'bearer' && !requestForm.authToken) {
-    requestForm.authToken = '{{token}}'
-  }
-})
-
-// 监听 Auth 变化，自动同步到 Headers
-watch(() => [requestForm.authType, requestForm.authToken], ([type, token]) => {
-  const authHeaderKey = 'Authorization'
-  if (type === 'bearer' && token) {
-    const tokenValue = `Bearer ${token}`
-    const existing = requestForm.headers.find(h => h.key === authHeaderKey)
-    if (existing) {
-      existing.value = tokenValue
-      existing.active = true
-    } else {
-      requestForm.headers.push({ active: true, key: authHeaderKey, value: tokenValue, desc: 'Auto generated' })
-    }
-  } else if (type === 'none') {
-    // 优化：切换回 none 时，自动禁用或删除 Authorization Header
-    const existingIndex = requestForm.headers.findIndex(h => h.key === authHeaderKey)
-    if (existingIndex !== -1) {
-      // 策略1：直接删除
-      // requestForm.headers.splice(existingIndex, 1) 
-      // 策略2：设为不激活 (更符合 Postman 习惯)
-      requestForm.headers[existingIndex].active = false
-    }
-  }
-})
-
-// 监听 URL 变化，自动提取 Path Variables
 watch(() => requestForm.url, (newUrl) => {
   if (!newUrl) {
     requestForm.pathParams = []
@@ -784,63 +524,27 @@ watch(() => requestForm.url, (newUrl) => {
   }
 })
 
-// 环境管理方法
-const openEnvManager = () => {
-  envDialogVisible.value = true
-}
-
-const addEnvRow = () => {
-  envList.value.push({ itemName: '', itemKey: '', reqUrl: '', reqBodyJson: '{}', itemType: 'env' })
-}
-
-const removeEnvRow = (index) => {
-  envList.value.splice(index, 1)
-}
-
-const saveEnvConfig = () => {
-  if (envList.value.some(e => !e.itemName || !e.itemKey)) {
-    proxy.$modal.msgWarning('环境名称和Key不能为空')
-    return
-  }
-  // 校验 JSON 格式
-  try {
-    envList.value.forEach(e => e.reqBodyJson && JSON.parse(e.reqBodyJson))
-  } catch (e) {
-    proxy.$modal.msgWarning('变量必须是有效的 JSON 格式')
-    return
-  }
-  saveEnvList(envList.value).then(() => {
-    envDialogVisible.value = false
-    proxy.$modal.msgSuccess('环境配置已保存')
-  })
-}
-
-// 辅助函数：安全解析 JSON
 const parseJson = (str) => {
   if (!str) return []
-  if (typeof str === 'object') return str // 已经是对象则直接返回
+  if (typeof str === 'object') return str
   try { return JSON.parse(str) } catch (e) { return [] }
 }
 
 const handleNodeClick = async (data) => {
-  // 只有点击具体的接口节点（有method属性）才加载数据
+  currentNodeType.value = data.itemType
   if (data.itemType === 'api') {
     currentNodeId.value = data.itemId
-    currentMode.value = 'tree' // 切换回树模式
 
-    // 切换节点时，先清空旧的响应和历史，避免混淆
+    // 切换节点时，立即重置表单和响应信息，防止旧节点的锁定状态或数据产生“残影”
     responseInfo.value = null
-    historyList.value = []
+    Object.assign(requestForm, getDefaultRequestForm())
+    responseDefList.value = []
 
     // 获取最新详情
     try {
       loading.value = true
       const res = await getApi(data.itemId)
       const apiData = res.data
-
-      // 1. 重置表单
-      Object.assign(requestForm, getDefaultRequestForm())
-      responseDefList.value = []
 
       // 2. 回显数据 (映射后端字段到前端表单)
       requestForm.itemName = apiData.itemName
@@ -853,24 +557,13 @@ const handleNodeClick = async (data) => {
       requestForm.headers = parseJson(apiData.reqHeaders)
       requestForm.pathParams = parseJson(apiData.reqPathParams)
       requestForm.formData = parseJson(apiData.reqFormData)
-      requestForm.responseDef = parseJson(apiData.responseDef)
+      responseDefList.value = parseJson(apiData.responseDef)
 
       // 普通字段
       if (apiData.reqBodyType) requestForm.bodyType = apiData.reqBodyType
       if (apiData.reqBodyJson) requestForm.bodyJson = apiData.reqBodyJson
-      if (apiData.authType) requestForm.authType = apiData.authType
-      if (apiData.authToken) requestForm.authToken = apiData.authToken
       if (apiData.isLocked) requestForm.isLocked = apiData.isLocked
 
-      // 兼容处理：如果 responseDef 解析出来是空的，赋值为空数组
-      if (!requestForm.responseDef) responseDefList.value = []
-      else responseDefList.value = requestForm.responseDef
-
-      // 移除此处强制添加默认 Header 的逻辑，避免覆盖用户保存的“无 Header”状态
-      // 默认 Header 仅在 getDefaultRequestForm 中初始化，用于新建或重置
-
-      // 加载该接口的历史记录
-      getHistory(data.itemId)
     } catch (error) {
       console.error(error)
       proxy.$modal.msgError('获取接口详情失败')
@@ -878,10 +571,11 @@ const handleNodeClick = async (data) => {
       loading.value = false
     }
   } else {
-    // 点击分组时，记录ID以便导出，但清空表单防止误编辑
+    // 点击分组时，显示分组信息但禁止在主区域编辑
     currentNodeId.value = data.itemId
-    currentMode.value = 'tree'
     Object.assign(requestForm, getDefaultRequestForm())
+    requestForm.itemName = data.itemName
+    requestForm.isLocked = data.isLocked
     responseDefList.value = []
   }
 }
@@ -894,24 +588,11 @@ const handleWrapperClick = (e) => {
   // 否则视为点击了空白处，清除选中状态
   treeRef.value.setCurrentKey(null)
   currentNodeId.value = null
-  currentMode.value = 'tree' // 点击空白处也视为回到树模式(未选中状态)
+  currentNodeType.value = null
   // 重置右侧表单
   Object.assign(requestForm, getDefaultRequestForm())
   responseDefList.value = [] // 修复：同时清空响应定义列表
   responseInfo.value = null
-  historyList.value = []
-}
-
-// 切换到快捷请求模式
-const handleShortcutMode = () => {
-  currentMode.value = 'scratch'
-  treeRef.value.setCurrentKey(null)
-  currentNodeId.value = null
-  Object.assign(requestForm, getDefaultRequestForm())
-  responseDefList.value = []
-  responseInfo.value = null
-  historyList.value = []
-  proxy.$modal.msgSuccess('已切换至快捷请求模式')
 }
 
 // 表格行操作
@@ -923,7 +604,6 @@ const removeRow = (list, index) => {
   list.splice(index, 1)
 }
 
-// --- UX优化: 增强的 Header 补全 ---
 const commonHeaderKeys = [
   { value: 'Accept' }, { value: 'Accept-Charset' }, { value: 'Accept-Encoding' }, { value: 'Accept-Language' },
   { value: 'Authorization' }, { value: 'Cache-Control' }, { value: 'Connection' }, { value: 'Content-Length' },
@@ -960,7 +640,6 @@ const queryHeaderValueSearch = (row, queryString, cb) => {
   cb(results)
 }
 
-// 格式化 JSON
 const formatJson = () => {
   try {
     const obj = JSON.parse(requestForm.bodyJson)
@@ -970,20 +649,10 @@ const formatJson = () => {
   }
 }
 
-// 变量替换辅助函数
-const replaceVariables = (str, variables) => {
-  if (!str || typeof str !== 'string') return str
-  return str.replace(/\{\{(.+?)\}\}/g, (match, key) => {
-    return variables[key.trim()] || match
-  })
-}
-
-// 路径参数替换辅助函数
 const replacePathParams = (url, pathParams) => {
   let newUrl = url
   pathParams.forEach(p => {
     if (p.key && p.value) {
-      // 修复：对 key 进行正则转义，防止特殊字符导致报错
       const escapedKey = p.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       newUrl = newUrl.replace(new RegExp(`\\{${escapedKey}\\}`, 'g'), p.value)
     }
@@ -991,19 +660,14 @@ const replacePathParams = (url, pathParams) => {
   return newUrl
 }
 
-// 发送请求
 const handleSend = async () => {
-  // 1. 基础校验
   if (!requestForm.url) {
     proxy.$modal.msgWarning('请输入接口地址')
     return
   }
-
-  // 2. JSON Body 校验 (仅在 POST/PUT/DELETE 且类型为 JSON 时)
-  // 注意：如果包含 {{}} 变量，则跳过校验，防止因变量未替换而导致 JSON 解析失败
   if (['POST', 'PUT', 'DELETE'].includes(requestForm.method) && requestForm.bodyType === 'json') {
-    const jsonStr = requestForm.bodyJson ? requestForm.bodyJson.trim() : ''
-    if (jsonStr && !jsonStr.includes('{{')) {
+    const jsonStr = (requestForm.bodyJson || '').trim()
+    if (jsonStr) {
       try {
         JSON.parse(jsonStr)
       } catch (e) {
@@ -1012,115 +676,47 @@ const handleSend = async () => {
       }
     }
   }
-
   loading.value = true
-
-  // 1. 获取当前环境的变量
-  let envVariables = {}
-  const currentEnvObj = envList.value.find(e => e.itemKey === currentItemKey.value)
-  if (currentEnvObj && currentEnvObj.reqBodyJson) {
-    try {
-      envVariables = JSON.parse(currentEnvObj.reqBodyJson)
-    } catch (e) {
-      console.error('环境变量解析失败', e)
-    }
-  }
-
-  // 2. 执行变量替换 (URL, Headers, AuthToken, Body)
-  // 注意：这里只替换用于发送的临时变量，不修改 requestForm 显示的值
-  const resolvedUrl = replaceVariables(requestForm.url, envVariables)
-  const resolvedBaseUrl = replaceVariables(currentBaseUrl.value, envVariables)
-
-  let finalUrl = ''
-  // 修复：如果 URL 是绝对路径，则忽略 Base URL
-  if (/^https?:\/\//i.test(resolvedUrl)) {
-    finalUrl = resolvedUrl
-  } else {
-    // 处理拼接时的斜杠问题
-    const base = resolvedBaseUrl.replace(/\/$/, '')
-    const path = resolvedUrl.replace(/^\//, '')
-    finalUrl = base ? `${base}/${path}` : resolvedUrl
-  }
-
-  const finalAuthToken = replaceVariables(requestForm.authToken, envVariables)
-  // 先替换 Path Params
-  finalUrl = replacePathParams(finalUrl, requestForm.pathParams)
-
-  // 组装最终 Headers (包含变量替换)
-  const finalHeaders = requestForm.headers.map(h => ({
-    ...h,
-    key: replaceVariables(h.key, envVariables),
-    value: replaceVariables(h.value, envVariables)
-  })).filter(h => h.active && h.key) // 过滤掉未激活的 Header
-
-  // 如果是 Bearer 模式，强制更新 Authorization Header
-  if (requestForm.authType === 'bearer' && finalAuthToken) {
-    const authHeader = finalHeaders.find(h => h.key === 'Authorization')
-    if (authHeader) authHeader.value = `Bearer ${finalAuthToken}`
-    else finalHeaders.push({ key: 'Authorization', value: `Bearer ${finalAuthToken}` })
-  }
-
-  // 组装 Headers 对象
+  let finalUrl = replacePathParams(requestForm.url, requestForm.pathParams)
+  const finalHeaders = requestForm.headers.filter(h => h.active && h.key)
   const headersObj = {}
   finalHeaders.forEach(h => headersObj[h.key] = h.value)
-
-  // --- 真实请求逻辑 (建议) ---
-  // 注意：纯前端直接请求会遇到 CORS 跨域问题。
-  // 解决方案：通常需要配置 vite/webpack 的 proxy，或者后端提供一个转发接口。
-
   try {
     const startTime = Date.now()
-
-    // 构造代理请求数据
     const proxyPayload = {
       itemId: currentNodeId.value,
       method: requestForm.method,
-      url: finalUrl, // 此时 url 包含 path params，但不包含 query params
+      url: finalUrl,
       headers: headersObj,
-      params: {}, // Query Params 留空，改为手动拼接到 URL
-      body: null, // Request Body
-      bodyType: requestForm.bodyType,
-      // 新增：传递UI快照用于历史记录
-      snapshotJson: JSON.stringify(requestForm)
+      params: {},
+      body: '',
+      bodyType: requestForm.bodyType
     }
-
-    // 处理 Query Params (手动拼接以支持重复 Key，如 ?id=1&id=2)
     const activeParams = requestForm.params.filter(p => p.active && p.key)
     if (activeParams.length > 0) {
       const queryString = activeParams.map(p => {
         const key = p.key
-        const val = replaceVariables(p.value, envVariables)
+        const val = p.value
         return `${encodeURIComponent(key)}=${encodeURIComponent(val)}`
       }).join('&')
-
-      if (proxyPayload.url.includes('?')) {
-        proxyPayload.url += '&' + queryString
-      } else {
-        proxyPayload.url += '?' + queryString
-      }
+      const connector = proxyPayload.url.includes('?') ? '&' : '?'
+      proxyPayload.url += connector + queryString
     }
-
-    // 处理 Body
     if (['POST', 'PUT', 'DELETE'].includes(requestForm.method)) {
       if (requestForm.bodyType === 'json') {
-        proxyPayload.body = replaceVariables(requestForm.bodyJson, envVariables)
+        proxyPayload.body = requestForm.bodyJson
       } else if (requestForm.bodyType === 'form') {
         const formDataObj = {}
         requestForm.formData.filter(f => f.active && f.key).forEach(f => {
-          formDataObj[f.key] = replaceVariables(f.value, envVariables)
+          formDataObj[f.key] = f.value
         })
         proxyPayload.body = formDataObj
       }
     }
-
-    // 发送真实代理请求
     const res = await proxyRequest(proxyPayload)
-    const actualResponse = res.data // 后端代理接口返回的真实响应
-
+    const actualResponse = res.data
     const endTime = Date.now()
     const duration = endTime - startTime
-
-    // 尝试格式化响应数据，以便在 Pretty 视图中显示
     let displayData = actualResponse.data
     if (typeof displayData === 'string') {
       try {
@@ -1129,7 +725,6 @@ const handleSend = async () => {
     } else if (typeof displayData === 'object') {
       displayData = JSON.stringify(displayData, null, 2)
     }
-
     loading.value = false
     responseInfo.value = {
       status: actualResponse.status,
@@ -1138,90 +733,24 @@ const handleSend = async () => {
       size: actualResponse.size,
       data: displayData
     }
-    activeResTab.value = 'response'
-
-    // 3. 结果反馈
     if (actualResponse.status === 0) {
       proxy.$modal.msgError('请求发送失败: ' + (typeof actualResponse.data === 'string' ? actualResponse.data : '网络或代理错误'))
     } else {
-      // 成功或正常的 HTTP 错误响应 (404, 500 等)
       proxy.$modal.msgSuccess(`请求完成 (Status: ${actualResponse.status})`)
     }
-
-    // 刷新历史记录列表 (后端会自动记录)
-    getHistory()
   } catch (error) {
     loading.value = false
     console.error(error)
     proxy.$modal.msgError(error.message || '请求失败')
-    // 也可以记录失败的历史
   }
 }
 
-// cURL 导入逻辑
-const handleCurlImport = () => {
-  curlDialogVisible.value = true
-  curlInput.value = ''
-}
-
-const parseCurl = () => {
-  const curlStr = curlInput.value.trim()
-  if (!curlStr) return
-
-  // 简易解析逻辑 (复用之前的思路)
-  try {
-    // 1. 提取 URL
-    const urlMatch = curlStr.match(/['"](http[s]?:\/\/[^'"]+)['"]?/) || curlStr.match(/curl\s+['"]?([^'"\s]+)/)
-    if (urlMatch) {
-      requestForm.url = urlMatch[1]
-    }
-
-    // 2. 提取 Method
-    if (curlStr.includes('-X POST') || curlStr.includes('--data')) {
-      requestForm.method = 'POST'
-    } else {
-      requestForm.method = 'GET'
-    }
-
-    // 3. 提取 Headers
-    const headerRegex = /-H\s+['"]([^'"]+)['"]/g
-    let hMatch
-    const newHeaders = []
-    while ((hMatch = headerRegex.exec(curlStr)) !== null) {
-      const [key, ...values] = hMatch[1].split(':')
-      if (key) {
-        newHeaders.push({ active: true, key: key.trim(), value: values.join(':').trim(), desc: '' })
-      }
-    }
-    if (newHeaders.length > 0) requestForm.headers = newHeaders
-
-    // 4. 提取 Body
-    const dataMatch = curlStr.match(/(--data-raw|--data|-d)\s+'"['"]/)
-    if (dataMatch && dataMatch[2]) {
-      requestForm.bodyType = 'json'
-      try {
-        const jsonBody = JSON.parse(dataMatch[2])
-        requestForm.bodyJson = JSON.stringify(jsonBody, null, 2)
-      } catch (e) {
-        requestForm.bodyJson = dataMatch[2]
-      }
-    }
-
-    proxy.$modal.msgSuccess('cURL 解析成功')
-    curlDialogVisible.value = false
-  } catch (e) {
-    proxy.$modal.msgError('cURL 解析失败: ' + e.message)
-  }
-}
-
-// 提取通用的数据构建逻辑
 const buildApiData = (id) => {
   return {
     itemId: id,
-    itemName: requestForm.itemName,
+    itemName: requestForm.itemName || '未命名接口',
     reqUrl: requestForm.url,
     reqMethod: requestForm.method,
-    // 复杂对象转 JSON 字符串存入数据库
     reqParams: JSON.stringify(requestForm.params),
     reqHeaders: JSON.stringify(requestForm.headers),
     reqPathParams: JSON.stringify(requestForm.pathParams),
@@ -1229,32 +758,15 @@ const buildApiData = (id) => {
     responseDef: JSON.stringify(responseDefList.value),
     reqBodyType: requestForm.bodyType,
     reqBodyJson: requestForm.bodyJson,
-    authType: requestForm.authType,
-    authToken: requestForm.authToken,
     isLocked: requestForm.isLocked
   }
 }
 
 const handleSave = () => {
-  // 快捷模式下，触发另存为
-  if (currentMode.value === 'scratch') {
-    if (!requestForm.url) {
-      proxy.$modal.msgWarning('接口地址不能为空')
-      return
-    }
-    saveAsForm.itemName = requestForm.itemName || '新接口'
-    saveAsForm.parentId = 0
-    saveAsDialogVisible.value = true
-    return
-  }
-
-  // 安全检查：如果已锁定，禁止保存
   if (requestForm.isLocked) {
     proxy.$modal.msgWarning('当前接口已被锁定，无法修改')
     return
   }
-
-  // 树模式下，常规保存
   if (!currentNodeId.value) {
     proxy.$modal.msgWarning('请先选择一个接口节点')
     return
@@ -1267,33 +779,11 @@ const handleSave = () => {
     proxy.$modal.msgWarning('接口地址不能为空')
     return
   }
-
   const saveData = buildApiData(currentNodeId.value)
-
   updateApi(saveData).then(() => {
     proxy.$modal.msgSuccess('接口信息已保存')
-    getTreeData() // 刷新树
+    getTreeData()
   })
-}
-
-// 提交另存为 (快捷请求 -> 正式接口)
-const submitSaveAs = async () => {
-  if (!saveAsForm.itemName) {
-    proxy.$modal.msgWarning('请输入接口名称')
-    return
-  }
-
-  const postData = buildApiData(0) // ID为0表示新增
-  postData.itemName = saveAsForm.itemName
-  postData.parentId = saveAsForm.parentId || 0
-  postData.itemType = 'api'
-
-  await addApi(postData)
-  proxy.$modal.msgSuccess('保存成功')
-  saveAsDialogVisible.value = false
-
-  // 刷新树并自动切换回树模式（逻辑在 getTreeData 后续操作中可优化，这里简单刷新即可）
-  getTreeData()
 }
 
 const handleExportDoc = (nodeData = null) => {
@@ -1301,8 +791,6 @@ const handleExportDoc = (nodeData = null) => {
     proxy.$modal.msgWarning('请先选择(或右键点击)要导出的接口或分组')
     return
   }
-
-  // 递归生成 Markdown 内容
   const generateMd = (nodes, level = 1) => {
     let md = ''
     for (const node of nodes) {
@@ -1311,8 +799,6 @@ const handleExportDoc = (nodeData = null) => {
 
       if (node.itemType === 'api') {
         md += `**URL**: \`${node.reqMethod} ${node.reqUrl}\`\n\n`
-
-        // Params
         const params = parseJson(node.reqParams)
         if (params && params.length > 0 && params.some(p => p.active)) {
           md += `**Query Params**:\n\n`
@@ -1322,13 +808,10 @@ const handleExportDoc = (nodeData = null) => {
           })
           md += `\n`
         }
-
-        // Body
         if (node.reqBodyType === 'json' && node.reqBodyJson) {
           md += `**Body (JSON)**:\n\`\`\`json\n${node.reqBodyJson}\n\`\`\`\n\n`
         }
       }
-
       if (node.children && node.children.length > 0) {
         md += generateMd(node.children, level + 1)
       }
@@ -1336,8 +819,6 @@ const handleExportDoc = (nodeData = null) => {
     }
     return md
   }
-
-  // 查找当前选中的节点对象（树结构）
   const findNode = (nodes, id) => {
     for (const node of nodes) {
       if (node.itemId === id) return node
@@ -1348,17 +829,12 @@ const handleExportDoc = (nodeData = null) => {
     }
     return null
   }
-
   let targetNode = nodeData
   if (!targetNode) {
     targetNode = findNode(apiTreeData.value, currentNodeId.value)
   }
-
   if (!targetNode) return
-
   const markdownContent = generateMd([targetNode])
-
-  // 创建 Blob 并下载
   const blob = new Blob([markdownContent], { type: 'text/markdown' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
@@ -1367,18 +843,6 @@ const handleExportDoc = (nodeData = null) => {
   URL.revokeObjectURL(link.href)
 
   proxy.$modal.msgSuccess('文档导出成功')
-}
-
-const restoreHistory = (item) => {
-  if (item.snapshotJson) {
-    Object.assign(requestForm, JSON.parse(item.snapshotJson))
-    proxy.$modal.msgSuccess('已恢复历史参数')
-  } else {
-    // 兼容旧数据
-    requestForm.method = item.reqMethod
-    requestForm.url = item.reqUrl.replace(currentBaseUrl.value, '')
-    proxy.$modal.msgSuccess('已恢复部分历史参数')
-  }
 }
 
 const handleCopyResponse = () => {
@@ -1397,7 +861,7 @@ const handleImportResponse = () => {
     return
   }
   try {
-    const json = parseJson(responseInfo.value.data) // 使用 parseJson 更安全
+    const json = parseJson(responseInfo.value.data)
     responseDefList.value = flattenJson(json)
     activeReqTab.value = 'responseDef'
     proxy.$modal.msgSuccess('响应结构导入成功')
@@ -1433,23 +897,21 @@ const flattenJson = (obj, prefix = '') => {
   return result
 }
 
-// --- 优化：统一删除逻辑 (供顶部按钮和右键菜单共用) ---
 const execDeleteNode = (node) => {
   const data = node.data
   proxy.$modal.confirm(`确定要删除 "${data.itemName}" 吗?`).then(() => {
     delApi(data.itemId).then(() => {
       proxy.$modal.msgSuccess('删除成功')
-      getTreeData() // 刷新树
-      // 如果删除的是当前选中的节点，清空选中状态
+      getTreeData()
       if (currentNodeId.value === data.itemId) {
         currentNodeId.value = null
+        currentNodeType.value = null
         Object.assign(requestForm, getDefaultRequestForm())
       }
     })
   }).catch(() => { })
 }
 
-// 右键菜单处理
 const handleNodeContextMenu = (event, data, node) => {
   contextMenu.node = node
   contextMenu.visible = true
@@ -1464,7 +926,6 @@ const handleContextMenu = (action) => {
 
   switch (action) {
     case 'addChild':
-      // 只有分组可以添加子节点
       if (node.data.itemType === 'api') {
         proxy.$modal.msgWarning('接口节点下不能再添加子节点')
         return
@@ -1480,7 +941,6 @@ const handleContextMenu = (action) => {
         updateApi({ itemId: node.data.itemId, itemName: value }).then(() => {
           proxy.$modal.msgSuccess('重命名成功')
           getTreeData()
-          // 修复：如果重命名的是当前选中的节点，同步更新右侧表单显示的名称
           if (currentNodeId.value === node.data.itemId) {
             requestForm.itemName = value
           }
@@ -1498,7 +958,6 @@ const handleContextMenu = (action) => {
       toggleLock(node.data.itemId, newLockState).then(() => {
         proxy.$modal.msgSuccess(newLockState ? '锁定成功' : '解锁成功')
         getTreeData()
-        // 如果操作的是当前选中的节点，同步更新右侧表单的锁定状态
         if (currentNodeId.value === node.data.itemId) {
           requestForm.isLocked = newLockState
         }
@@ -1517,13 +976,9 @@ function reset() {
   }
   proxy.resetForm("createFormRef")
 }
-
-// 新建逻辑
 const handleCreate = (parentNode = null) => {
   reset()
   createDialogVisible.value = true
-
-  // 如果是从右键菜单“新增子节点”进来，parentNode 是 Node 对象
   if (parentNode && parentNode.data) {
     createParentNode.value = parentNode
   } else {
@@ -1568,59 +1023,6 @@ const submitCreate = async () => {
   }
 }
 
-// --- 导入导出功能 ---
-
-const handleMoreCommand = (command) => {
-  if (command === 'export') {
-    handleExportAll()
-  } else if (command === 'import') {
-    importFileRef.value.click()
-  }
-}
-
-const handleExportAll = async () => {
-  try {
-    const res = await exportData()
-    const dataStr = JSON.stringify(res.data, null, 2)
-    const blob = new Blob([dataStr], { type: 'application/json' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `api_backup_${new Date().getTime()}.json`
-    link.click()
-    URL.revokeObjectURL(link.href)
-    proxy.$modal.msgSuccess('备份导出成功')
-  } catch (e) {
-    proxy.$modal.msgError('导出失败')
-  }
-}
-
-const handleImportFileChange = (e) => {
-  const file = e.target.files[0]
-  if (!file) return
-
-  const reader = new FileReader()
-  reader.onload = async (e) => {
-    try {
-      const json = JSON.parse(e.target.result)
-      await proxy.$modal.confirm('导入将新增接口和环境配置，确定要继续吗？')
-      loading.value = true
-      await importData(json)
-      proxy.$modal.msgSuccess('导入成功')
-      // 刷新数据
-      getTreeData()
-      initEnvs()
-    } catch (err) {
-      if (err === 'cancel') return // 用户点击了取消，静默处理
-      console.error(err)
-      proxy.$modal.msgError('导入失败: ' + (err.message || '文件格式错误'))
-    } finally {
-      loading.value = false
-      importFileRef.value.value = '' // 清空 input，允许重复导入同名文件
-    }
-  }
-  reader.readAsText(file)
-}
-
 // --- 拖拽功能逻辑 ---
 
 // 拖拽规则控制
@@ -1632,27 +1034,21 @@ const allowDrop = (draggingNode, dropNode, type) => {
   }
   return true
 }
-
-// 拖拽完成后的处理
 const handleNodeDrop = (draggingNode, dropNode, dropType) => {
   let newParentId = 0
   if (dropType === 'inner') {
     newParentId = dropNode.data.itemId
   } else {
-    // 如果是拖到前后，则父节点与目标节点相同
     newParentId = dropNode.data.parentId
   }
-
-  // 调用后端更新父节点ID
   updateApi({ itemId: draggingNode.data.itemId, parentId: newParentId }).then(() => {
     proxy.$modal.msgSuccess('移动成功')
   }).catch(() => {
-    getTreeData() // 失败则刷新树，恢复原状
+    getTreeData()
   })
 }
 
 onMounted(() => {
-  initEnvs()
   getTreeData()
 })
 </script>
@@ -1697,23 +1093,33 @@ onMounted(() => {
   width: 100vw;
   height: 100vh;
   z-index: 2000;
-  /* 必须比菜单(2001)低，但比页面内容高 */
   background: transparent;
+}
+
+/* Splitpanes 样式适配 */
+:deep(.splitpanes.default-theme) {
+  .splitpanes__splitter {
+    background-color: var(--el-border-color-extra-light);
+    border-left: 1px solid var(--el-border-color-lighter);
+    box-sizing: border-box;
+    width: 6px;
+
+    &:hover {
+      background-color: var(--el-color-primary-light-7);
+    }
+  }
 }
 
 .api-manager-container {
   height: calc(100vh - 84px);
-  /* 减去 navbar 和 tagsview 的高度 */
   display: flex;
   overflow: hidden;
-  background-color: var(--el-bg-color);
+  background-color: var(--el-bg-color-page);
   color: var(--el-text-color-primary);
 }
 
-/* 左侧侧边栏 */
 .sidebar {
   width: 280px;
-  background-color: var(--el-bg-color);
   border-right: 1px solid var(--el-border-color);
   display: flex;
   flex-direction: column;
@@ -1724,8 +1130,8 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
     border-bottom: 1px solid var(--el-border-color);
-    font-weight: bold;
     color: var(--el-text-color-primary);
+    font-weight: 600;
   }
 
   .sidebar-search {
@@ -1734,35 +1140,25 @@ onMounted(() => {
 
     :deep(.el-input__wrapper) {
       box-shadow: none;
-      background-color: transparent;
-    }
-
-    :deep(.el-input__inner) {
-      color: var(--el-text-color-regular);
+      background: transparent;
     }
   }
 
   .api-tree-wrapper {
     flex: 1;
     overflow-y: auto;
-    padding: 10px 0;
-
-    :deep(.el-tree) {
-      background: transparent;
-      color: var(--el-text-color-regular);
-    }
+    padding: 5px 0;
 
     :deep(.el-tree-node__content) {
-      height: 32px;
-      /* 增加行高，点击更舒适 */
+      height: 34px;
     }
 
     :deep(.el-tree-node__content:hover) {
-      background-color: var(--el-color-primary-light-9);
+      background-color: var(--el-fill-color-lighter);
     }
 
-    :deep(.el-tree-node:focus > .el-tree-node__content) {
-      background-color: var(--el-color-primary-light-9);
+    :deep(.el-tree-node.is-current > .el-tree-node__content) {
+      background-color: var(--el-color-primary-light-8) !important;
     }
   }
 }
@@ -1799,45 +1195,48 @@ onMounted(() => {
   }
 }
 
-/* 主内容区 */
 .main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+.workspace {
+  flex: 1;
+  overflow: hidden;
+}
+
+.request-header-bar {
+  padding: 15px 15px 10px 15px;
   background-color: var(--el-bg-color);
 
-  .top-bar {
-    padding: 10px 15px;
-    background-color: var(--el-bg-color);
-    border-bottom: 1px solid var(--el-border-color);
-  }
+  .url-input-container {
+    display: flex;
+    gap: 10px;
 
-  .locked-form {
-    opacity: 0.6;
-    pointer-events: none;
-  }
-
-  .workspace {
-    flex: 1;
-    overflow: hidden;
-
-    .request-panel {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid var(--el-border-color);
+    .el-input {
+      flex: 1;
     }
 
-    .response-panel {
-      height: 100%;
+    .action-buttons {
       display: flex;
-      flex-direction: column;
-      background-color: var(--el-bg-color);
+      gap: 8px;
     }
   }
 }
 
-/* 通用面板样式 */
+.locked-form {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.request-panel,
+.response-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 .panel-content {
   padding: 10px;
   height: 100%;
@@ -1897,35 +1296,6 @@ onMounted(() => {
   }
 }
 
-.history-card {
-  background-color: var(--el-bg-color-overlay);
-  border: 1px solid var(--el-border-color-light);
-  color: var(--el-text-color-primary);
-  cursor: pointer;
-  margin-bottom: 5px;
-
-  :deep(.el-card__body) {
-    padding: 10px;
-  }
-
-  h4 {
-    margin: 0 0 5px 0;
-    font-size: 13px;
-    color: var(--el-text-color-primary);
-  }
-
-  p {
-    margin: 0;
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
-  }
-
-  &:hover {
-    border-color: var(--el-color-primary);
-  }
-}
-
-/* 覆盖 Element Plus Tabs 样式以适应暗色主题 */
 :deep(.custom-tabs) {
   height: 100%;
   display: flex;
@@ -1933,7 +1303,7 @@ onMounted(() => {
 
   .el-tabs__header {
     margin: 0;
-    background-color: var(--el-fill-color-light);
+    background-color: var(--el-bg-color);
     border-bottom: 1px solid var(--el-border-color);
     padding: 0 15px;
   }
@@ -1943,14 +1313,9 @@ onMounted(() => {
   }
 
   .el-tabs__item {
-    color: var(--el-text-color-secondary);
-    height: 36px;
-    line-height: 36px;
-
-    &.is-active {
-      color: var(--el-color-primary);
-      background-color: var(--el-bg-color);
-    }
+    height: 38px;
+    line-height: 38px;
+    font-weight: normal;
   }
 
   .el-tabs__content {
@@ -1963,9 +1328,8 @@ onMounted(() => {
   }
 }
 
-/* 表格样式微调，移除强制背景色，使用 Element Plus 变量 */
 :deep(.el-table) {
-  .el-input__wrapper {
+  .el-table__row .el-input__wrapper {
     box-shadow: none;
     padding: 0;
     background-color: transparent;
