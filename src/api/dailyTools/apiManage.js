@@ -1,7 +1,5 @@
 import request from '@/utils/request'
 
-// --- 接口/目录树管理 ---
-
 // 查询接口树形列表
 export function listApiTree(query) {
   return request({
@@ -53,29 +51,6 @@ export function toggleLock(itemId, isLocked) {
   })
 }
 
-
-// --- 环境管理 ---
-
-// 查询环境列表
-export function listEnv(query) {
-  return request({
-    url: '/dailytools/apiManage/env/list',
-    method: 'get',
-    params: query
-  })
-}
-
-// 批量保存环境列表 (适配前端一次性保存所有环境的逻辑)
-export function saveEnvList(data) {
-  return request({
-    url: '/dailytools/apiManage/env/batch',
-    method: 'post',
-    data: data
-  })
-}
-
-// --- 历史记录 ---
-
 // 查询历史记录列表
 export function listHistory(query) {
   return request({
@@ -94,29 +69,10 @@ export function addHistory(data) {
   })
 }
 
-// --- 核心功能 ---
-
 // 发送代理请求 (解决浏览器跨域问题，核心接口)
 export function proxyRequest(data) {
   return request({
     url: '/dailytools/apiManage/proxy',
-    method: 'post',
-    data: data
-  })
-}
-
-// 导出所有数据
-export function exportData() {
-  return request({
-    url: '/dailytools/apiManage/export',
-    method: 'get'
-  })
-}
-
-// 导入数据
-export function importData(data) {
-  return request({
-    url: '/dailytools/apiManage/import',
     method: 'post',
     data: data
   })
