@@ -690,12 +690,13 @@ const replacePathParams = (url, pathParams) => {
 }
 
 const handleSend = async () => {
-  if (!requestForm.url) {
+  const url = requestForm.url ? requestForm.url.trim() : '';
+  if (!url) {
     proxy.$modal.msgWarning('请输入接口地址')
     return
   }
   loading.value = true
-  let finalUrl = replacePathParams(requestForm.url, requestForm.pathParams)
+  let finalUrl = replacePathParams(url, requestForm.pathParams);
   const finalHeaders = requestForm.headers.filter(h => h.active && h.key)
   const headersObj = {}
   finalHeaders.forEach(h => headersObj[h.key] = h.value)
@@ -799,7 +800,7 @@ const handleSave = () => {
     proxy.$modal.msgWarning('接口名称不能为空')
     return
   }
-  if (!requestForm.url) {
+  if (!requestForm.url || !requestForm.url.trim()) {
     proxy.$modal.msgWarning('接口地址不能为空')
     return
   }
@@ -923,7 +924,16 @@ const flattenJson = (obj, prefix = '') => {
 
 const execDeleteNode = (node) => {
   const data = node.data
-  proxy.$modal.confirm(`确定要删除 "${data.itemName}" 吗?`).then(() => {
+  const isGroup = data.itemType === 'group'
+  const confirmMsg = isGroup
+    ? `确认要删除分组 "${data.itemName}" 及其包含的所有子目录和接口吗？此操作将同步清除所有关联的请求历史且无法恢复！`
+    : `确认要删除接口 "${data.itemName}" 吗？相关的请求历史也将被一并清除。`
+
+  proxy.$modal.confirm(confirmMsg, "警告", {
+    confirmButtonText: "确定",
+    cancelButtonText: "取消",
+    type: "warning"
+  }).then(() => {
     delApi(data.itemId).then(() => {
       proxy.$modal.msgSuccess('删除成功')
       getTreeData()
