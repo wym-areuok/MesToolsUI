@@ -74,7 +74,7 @@
       <template v-if="currentNodeType === 'api'">
         <div class="workspace">
           <splitpanes class="default-theme">
-            <pane :size="60">
+            <pane :size="60" style="min-width: 0">
               <div class="request-panel">
                 <div class="request-header-bar">
                   <el-alert v-if="requestForm.isLocked" title="接口已锁定" type="info" :closable="false" show-icon
@@ -95,7 +95,8 @@
                       </template>
                     </el-input>
                     <div class="action-buttons">
-                      <el-button type="primary" icon="Promotion" @click="handleSend" :loading="loading">发送</el-button>
+                      <el-button type="primary" icon="Promotion" @click="handleSend"
+                        :loading="sendLoading">发送</el-button>
                       <el-button type="success" plain icon="FolderChecked" @click="handleSave"
                         v-hasPermi="['dailyTools:apiManage:insert', 'dailyTools:apiManage:edit']"
                         :disabled="requestForm.isLocked">保存</el-button>
@@ -199,7 +200,7 @@
                   <el-tab-pane label="Body" name="body">
                     <div class="panel-content body-content">
                       <div class="body-toolbar">
-                        <el-radio-group v-model="requestForm.bodyType" size="small">
+                        <el-radio-group v-model="requestForm.bodyType" size="small" @change="handleBodyTypeChange">
                           <el-radio-button label="none">none</el-radio-button>
                           <el-radio-button label="json">raw (json)</el-radio-button>
                           <el-radio-button label="form">form-data</el-radio-button>
@@ -272,7 +273,7 @@
               </div>
             </pane>
 
-            <pane :size="40">
+            <pane :size="40" style="min-width: 0">
               <div class="response-panel">
                 <el-tabs v-model="activeResTab" class="custom-tabs">
                   <el-tab-pane label="当前响应" name="response">
@@ -400,6 +401,7 @@ const { proxy } = getCurrentInstance()
 const filterText = ref('')
 const treeRef = ref(null)
 const loading = ref(false)
+const sendLoading = ref(false)
 const activeReqTab = ref('params')
 const activeResTab = ref('response')
 const createDialogVisible = ref(false)
@@ -447,7 +449,7 @@ const getDefaultRequestForm = () => ({
   ],
   bodyType: 'json',
   bodyJson: '{\n  \n}',
-  isLocked: 0
+  isLocked: false
 })
 const requestForm = reactive(getDefaultRequestForm())
 
@@ -464,7 +466,8 @@ const getTreeData = async () => {
   }
 
   const res = await listApiTree()
-  apiTreeData.value = res.data || []
+  // 3. 递归处理数据，确保 isLocked 为布尔值，防止 Tree 内部组件警告
+  apiTreeData.value = formatTreeData(res.data || [])
 
   // 2. 恢复展开状态
   await nextTick()
@@ -474,6 +477,14 @@ const getTreeData = async () => {
       if (node) node.expanded = true
     })
   }
+}
+
+function formatTreeData(data) {
+  return data.map(item => ({
+    ...item,
+    isLocked: !!item.isLocked,
+    children: item.children ? formatTreeData(item.children) : []
+  }))
 }
 
 const urlPlaceholder = ref('请输入完整接口地址 (如 http://localhost/api...)')
@@ -518,7 +529,7 @@ watch(() => requestForm.url, (newUrl) => {
     return
   }
   // 匹配 {xxx} 格式
-  const matches = newUrl.match(/\{([a-zA-Z0-9_]+)\}/g)
+  const matches = newUrl.match(/\{([\w-]+)\}/g)
   if (matches) {
     const keys = matches.map(m => m.slice(1, -1))
     // 保留已有的值，移除不存在的，添加新的
@@ -533,9 +544,22 @@ watch(() => requestForm.url, (newUrl) => {
 })
 
 const parseJson = (str) => {
-  if (!str) return []
+  if (!str || str === 'undefined') return []
   if (typeof str === 'object') return str
   try { return JSON.parse(str) } catch (e) { return [] }
+}
+
+// Body 类型切换时自动处理 Header
+const handleBodyTypeChange = (type) => {
+  if (type === 'json') {
+    const hasContentType = requestForm.headers.some(h => h.key.toLowerCase() === 'content-type')
+    if (!hasContentType) {
+      requestForm.headers.unshift({ active: true, key: 'Content-Type', value: 'application/json', desc: 'Auto-added' })
+    } else {
+      const ct = requestForm.headers.find(h => h.key.toLowerCase() === 'content-type')
+      if (ct) ct.value = 'application/json'
+    }
+  }
 }
 
 const handleNodeClick = async (data) => {
@@ -561,7 +585,7 @@ const handleNodeClick = async (data) => {
       responseDefList.value = parseJson(apiData.responseDef)
       if (apiData.reqBodyType) requestForm.bodyType = apiData.reqBodyType
       if (apiData.reqBodyJson) requestForm.bodyJson = apiData.reqBodyJson
-      if (apiData.isLocked) requestForm.isLocked = apiData.isLocked
+      requestForm.isLocked = !!apiData.isLocked
       getHistory()
     } catch (error) {
       console.error(error)
@@ -607,18 +631,28 @@ const getHistory = async () => {
 
 // 还原历史快照
 const handleRestoreHistory = (row) => {
-  if (!row.snapshotJson) return
+  if (!row.snapshotJson || row.snapshotJson === 'undefined') {
+    proxy.$modal.msgError('该历史记录不包含快照数据')
+    return
+  }
   try {
     const snapshot = JSON.parse(row.snapshotJson)
-    requestForm.method = snapshot.method
-    requestForm.url = snapshot.url
-    requestForm.params = snapshot.params
-    requestForm.headers = snapshot.headers
-    requestForm.pathParams = snapshot.pathParams
-    requestForm.bodyType = snapshot.bodyType
-    requestForm.bodyJson = snapshot.bodyJson
-    requestForm.formData = snapshot.formData
-    proxy.$modal.msgSuccess('已根据历史快照还原请求参数')
+    if (!snapshot || typeof snapshot !== 'object') return
+
+    // 1. 先还原非触发式的数组数据，确保数据完整性 (使用空数组兜底)
+    requestForm.method = snapshot.method || 'GET'
+    requestForm.params = Array.isArray(snapshot.params) ? snapshot.params : []
+    requestForm.headers = Array.isArray(snapshot.headers) ? snapshot.headers : []
+    requestForm.pathParams = Array.isArray(snapshot.pathParams) ? snapshot.pathParams : []
+    requestForm.bodyType = snapshot.bodyType || 'none'
+    requestForm.bodyJson = snapshot.bodyJson || ''
+    requestForm.formData = Array.isArray(snapshot.formData) ? snapshot.formData : []
+
+    // 2. 最后还原 URL，这会触发 url 的 watch，逻辑会自动从已还原的 pathParams 中匹配值
+    requestForm.url = snapshot.url || ''
+
+    activeReqTab.value = requestForm.bodyType !== 'none' ? 'body' : 'params'
+    proxy.$modal.msgSuccess('已从历史记录还原参数')
   } catch (e) {
     proxy.$modal.msgError('快照数据解析失败')
   }
@@ -670,11 +704,16 @@ const queryHeaderValueSearch = (row, queryString, cb) => {
 }
 
 const formatJson = () => {
+  if (!requestForm.bodyJson || !requestForm.bodyJson.trim()) {
+    proxy.$modal.msgInfo('当前内容为空，无需格式化')
+    return
+  }
   try {
     const obj = JSON.parse(requestForm.bodyJson)
     requestForm.bodyJson = JSON.stringify(obj, null, 2)
+    proxy.$modal.msgSuccess('格式化成功')
   } catch (e) {
-    proxy.$modal.msgWarning('JSON 格式错误，无法格式化')
+    proxy.$modal.msgWarning('JSON 格式有误，请检查语法 (例如引号、逗号等)')
   }
 }
 
@@ -695,13 +734,13 @@ const handleSend = async () => {
     proxy.$modal.msgWarning('请输入接口地址')
     return
   }
-  loading.value = true
+  sendLoading.value = true
   let finalUrl = replacePathParams(url, requestForm.pathParams);
   const finalHeaders = requestForm.headers.filter(h => h.active && h.key)
   const headersObj = {}
   finalHeaders.forEach(h => headersObj[h.key] = h.value)
   try {
-    const startTime = Date.now()
+    const startTime = performance.now()
     const proxyPayload = {
       itemId: currentNodeId.value,
       method: requestForm.method,
@@ -740,8 +779,8 @@ const handleSend = async () => {
     }
     const res = await proxyRequest(proxyPayload)
     const actualResponse = res.data
-    const endTime = Date.now()
-    const duration = endTime - startTime
+    const endTime = performance.now()
+    const duration = Math.round(endTime - startTime)
     let displayData = actualResponse.data
     if (typeof displayData === 'string') {
       try {
@@ -750,7 +789,7 @@ const handleSend = async () => {
     } else if (typeof displayData === 'object') {
       displayData = JSON.stringify(displayData, null, 2)
     }
-    loading.value = false
+    sendLoading.value = false
     responseInfo.value = {
       status: actualResponse.status,
       statusText: actualResponse.statusText || 'Error',
@@ -765,8 +804,9 @@ const handleSend = async () => {
     }
     getHistory()
   } catch (error) {
-    loading.value = false
-    // 此处不再 msgError，因为 request.js 拦截器已经报过系统级错误了
+    sendLoading.value = false
+  } finally {
+    sendLoading.value = false
   }
 }
 
@@ -783,7 +823,7 @@ const buildApiData = (id) => {
     responseDef: JSON.stringify(responseDefList.value),
     reqBodyType: requestForm.bodyType,
     reqBodyJson: requestForm.bodyJson,
-    isLocked: requestForm.isLocked
+    isLocked: requestForm.isLocked ? 1 : 0
   }
 }
 
@@ -997,7 +1037,7 @@ const handleContextMenu = (action) => {
         proxy.$modal.msgSuccess(newLockState ? '锁定成功' : '解锁成功')
         getTreeData()
         if (currentNodeId.value === node.data.itemId) {
-          requestForm.isLocked = newLockState
+          requestForm.isLocked = !!newLockState
         }
       })
       break
@@ -1158,7 +1198,9 @@ onMounted(() => {
 }
 
 .sidebar {
-  width: 280px;
+  flex: 0 0 20%;
+  min-width: 250px;
+  max-width: 400px;
   border-right: 1px solid var(--el-border-color);
   display: flex;
   flex-direction: column;
@@ -1236,12 +1278,15 @@ onMounted(() => {
 
 .main-content {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .workspace {
   flex: 1;
+  width: 100%;
   overflow: hidden;
 }
 
@@ -1273,12 +1318,18 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 .panel-content {
   padding: 10px;
   height: 100%;
+  width: 100%;
+  box-sizing: border-box;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
 
@@ -1322,6 +1373,9 @@ onMounted(() => {
     display: flex;
     align-items: center;
     gap: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     .meta-item {
       color: var(--el-text-color-secondary);
@@ -1338,6 +1392,7 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 
   .el-tabs__header {
     margin: 0;
@@ -1367,6 +1422,8 @@ onMounted(() => {
 }
 
 :deep(.el-table) {
+  width: 100% !important;
+
   .el-table__row .el-input__wrapper {
     box-shadow: none;
     padding: 0;

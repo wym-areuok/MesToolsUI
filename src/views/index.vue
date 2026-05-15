@@ -256,7 +256,7 @@ function handleGlobalSearch() {
 .home {
   .welcome-card {
     border: none;
-    background: linear-gradient(135deg, #f6f8f9 0%, #e5ebee 100%);
+    background: linear-gradient(135deg, var(--el-fill-color-light) 0%, var(--el-bg-color-page) 100%);
 
     .welcome-header {
       display: flex;
@@ -268,12 +268,12 @@ function handleGlobalSearch() {
     .greet-title {
       font-size: 24px;
       font-weight: 600;
-      color: #303133;
+      color: var(--el-text-color-primary);
       margin: 0 0 10px 0;
     }
 
     .greet-desc {
-      color: #606266;
+      color: var(--el-text-color-regular);
       margin: 0;
       font-size: 14px;
     }
@@ -282,9 +282,9 @@ function handleGlobalSearch() {
       max-width: 400px;
 
       :deep(.el-input-group__append) {
-        background-color: #409EFF;
+        background-color: var(--el-color-primary);
         color: white;
-        border-color: #409EFF;
+        border-color: var(--el-color-primary);
       }
     }
   }
@@ -326,16 +326,16 @@ function handleGlobalSearch() {
     align-items: center;
     padding: 15px;
     border-radius: 8px;
-    background-color: #f8f9fa;
+    background-color: var(--el-fill-color-lighter);
     cursor: pointer;
     transition: all 0.3s ease;
-    border: 1px solid transparent;
+    border: 1px solid var(--el-border-color-lighter);
 
     &:hover {
-      background-color: #fff;
+      background-color: var(--el-bg-color-overlay);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
       transform: translateY(-2px);
-      border-color: #ebeef5;
+      border-color: var(--el-border-color-light);
     }
 
     &:hover .tool-icon {
@@ -360,7 +360,7 @@ function handleGlobalSearch() {
       .tool-title {
         font-size: 16px;
         font-weight: 600;
-        color: #303133;
+        color: var(--el-text-color-primary);
         margin-bottom: 5px;
         white-space: nowrap;
         overflow: hidden;
@@ -369,7 +369,7 @@ function handleGlobalSearch() {
 
       .tool-desc {
         font-size: 12px;
-        color: #909399;
+        color: var(--el-text-color-secondary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -382,12 +382,13 @@ function handleGlobalSearch() {
       margin: 0 0 5px;
       font-size: 14px;
       font-weight: 600;
+      color: var(--el-text-color-primary);
     }
 
     p {
       margin: 0;
       font-size: 12px;
-      color: #909399;
+      color: var(--el-text-color-secondary);
     }
   }
 
@@ -401,14 +402,14 @@ function handleGlobalSearch() {
     }
 
     &::-webkit-scrollbar-thumb {
-      background: #e0e3e9;
+      background: var(--el-border-color-lighter);
       border-radius: 4px;
     }
   }
 
   .about-section {
     font-size: 14px;
-    color: #606266;
+    color: var(--el-text-color-regular);
     line-height: 1.6;
 
     .tech-tags {
