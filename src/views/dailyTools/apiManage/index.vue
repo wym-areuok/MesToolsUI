@@ -17,7 +17,11 @@
           @node-drop="handleNodeDrop" @node-click="handleNodeClick" @node-contextmenu="handleNodeContextMenu">
           <template #default="{ node, data }">
             <span class="custom-tree-node">
-              <el-tag v-if="data.itemType === 'api'" size="small" :type="getMethodType(data.reqMethod)"
+              <el-tag v-if="data.itemType === 'api' && data.protocol === 'webservice'" size="small" type="info"
+                class="method-tag">
+                SOAP
+              </el-tag>
+              <el-tag v-else-if="data.itemType === 'api'" size="small" :type="getMethodType(data.reqMethod)"
                 class="method-tag">
                 {{ data.reqMethod }}
               </el-tag>
@@ -80,9 +84,11 @@
                   <el-alert v-if="requestForm.isLocked" title="接口已锁定" type="info" :closable="false" show-icon
                     style="margin-bottom: 10px; padding: 5px 10px;" />
                   <div class="url-input-container">
-                    <el-input v-model="requestForm.url" :placeholder="urlPlaceholder">
+                    <el-input v-model="requestForm.url"
+                      :placeholder="requestForm.protocol === 'webservice' ? '请输入 WebService 地址 (ASMX/WSDL 地址)...' : urlPlaceholder">
                       <template #prepend>
-                        <el-select v-model="requestForm.method" style="width: 100px">
+                        <el-select v-model="requestForm.method" style="width: 100px"
+                          :disabled="requestForm.protocol === 'webservice'">
                           <el-option label="GET" value="GET"><span
                               style="color: var(--el-color-success); font-weight: bold">GET</span></el-option>
                           <el-option label="POST" value="POST"><span
@@ -169,7 +175,7 @@
                             <el-checkbox v-model="scope.row.active" />
                           </template>
                         </el-table-column>
-                        <el-table-column label="Key" width="200">
+                        <el-table-column label="Header Key" width="200">
                           <template #default="scope">
                             <el-autocomplete v-model="scope.row.key" :fetch-suggestions="queryHeaderSearch"
                               placeholder="Key" style="width: 100%" />
@@ -200,17 +206,21 @@
                   <el-tab-pane label="Body" name="body">
                     <div class="panel-content body-content">
                       <div class="body-toolbar">
-                        <el-radio-group v-model="requestForm.bodyType" size="small" @change="handleBodyTypeChange">
+                        <el-radio-group v-model="requestForm.bodyType" size="small" @change="handleBodyTypeChange"
+                          :disabled="requestForm.protocol === 'webservice'">
                           <el-radio-button label="none">none</el-radio-button>
-                          <el-radio-button label="json">raw (json)</el-radio-button>
+                          <el-radio-button label="json">{{ requestForm.protocol === 'webservice' ? 'XML' : 'raw (json)'
+                          }}</el-radio-button>
                           <el-radio-button label="form">form-data</el-radio-button>
                         </el-radio-group>
-                        <el-button link type="primary" size="small" @click="formatJson">格式化
-                          JSON</el-button>
+                        <el-button link type="primary" size="small" @click="handleFormat">格式化</el-button>
                       </div>
-                      <div class="editor-wrapper" v-if="requestForm.bodyType === 'json'">
-                        <codemirror v-model="requestForm.bodyJson" placeholder="请输入 JSON..." :style="{ height: '100%' }"
-                          :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="extensions" />
+                      <div class="editor-wrapper"
+                        v-if="requestForm.bodyType === 'json' || requestForm.protocol === 'webservice'">
+                        <codemirror v-model="requestForm.bodyJson"
+                          :placeholder="requestForm.protocol === 'webservice' ? '请输入 SOAP Envelope XML...' : '请输入 JSON...'"
+                          :style="{ height: '100%' }" :autofocus="true" :indent-with-tab="true" :tab-size="2"
+                          :extensions="requestForm.protocol === 'webservice' ? [] : extensions" />
                       </div>
                       <div v-else-if="requestForm.bodyType === 'form'" class="panel-content" style="padding-top: 0;">
                         <el-table :data="requestForm.formData" style="width: 100%" size="small" border>
@@ -279,18 +289,21 @@
                   <el-tab-pane label="当前响应" name="response">
                     <div class="panel-content response-content">
                       <div class="response-meta" v-if="responseInfo">
-                        <el-tag :type="responseInfo.status === 200 ? 'success' : 'danger'" effect="dark" size="small">
+                        <el-tag :type="responseInfo.status >= 200 && responseInfo.status < 300 ? 'success' : 'danger'"
+                          effect="dark" size="small" class="status-tag">
                           {{ responseInfo.status }} {{ responseInfo.statusText }}
                         </el-tag>
-                        <span class="meta-item">耗时: {{ responseInfo.time }}ms</span>
+                        <span class="meta-item time-item">耗时: {{ responseInfo.time }}ms</span>
                         <span class="meta-item">大小: {{ responseInfo.size }}</span>
                         <el-button type="primary" link size="small" style="margin-left: auto;"
                           @click="handleCopyResponse">复制</el-button>
-                        <el-button type="primary" link size="small" @click="handleImportResponse">导入为响应结构</el-button>
+                        <el-button type="primary" link size="small" @click="handleFormatResponse">格式化</el-button>
+                        <el-button v-if="requestForm.protocol !== 'webservice'" type="primary" link size="small"
+                          @click="handleImportResponse">导入为响应结构</el-button>
                       </div>
                       <div class="editor-wrapper" v-if="responseInfo">
-                        <codemirror v-model="responseInfo.data" :style="{ height: '100%' }" :extensions="extensions"
-                          :disabled="true" />
+                        <codemirror v-model="responseInfo.data" :style="{ height: '100%' }"
+                          :extensions="requestForm.protocol === 'webservice' ? [] : extensions" :disabled="true" />
                       </div>
                       <el-empty v-else description="点击发送查看响应" :image-size="80" />
                     </div>
@@ -357,7 +370,13 @@
           <el-input v-model="createForm.itemName" placeholder="请输入名称" />
         </el-form-item>
         <template v-if="createForm.itemType === 'api'">
-          <el-form-item label="请求方式" prop="reqMethod">
+          <el-form-item label="协议类型" prop="protocol">
+            <el-radio-group v-model="createForm.protocol">
+              <el-radio label="http">HTTP (REST)</el-radio>
+              <el-radio label="webservice">WebService (SOAP)</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="createForm.protocol === 'http'" label="请求方式" prop="reqMethod">
             <el-select v-model="createForm.reqMethod" placeholder="请选择">
               <el-option label="GET" value="GET" />
               <el-option label="POST" value="POST" />
@@ -433,6 +452,7 @@ const defaultProps = {
 }
 const getDefaultRequestForm = () => ({
   itemName: '',
+  protocol: 'http',
   method: 'GET',
   url: '',
   pathParams: [],
@@ -494,6 +514,7 @@ const responseInfo = ref(null)
 const data = reactive({
   createForm: {
     itemType: 'group',
+    protocol: 'http',
     itemName: '',
     reqMethod: 'GET',
     reqUrl: ''
@@ -528,16 +549,20 @@ watch(() => requestForm.url, (newUrl) => {
     requestForm.pathParams = []
     return
   }
-  // 匹配 {xxx} 格式
-  const matches = newUrl.match(/\{([\w-]+)\}/g)
-  if (matches) {
-    const keys = matches.map(m => m.slice(1, -1))
-    // 保留已有的值，移除不存在的，添加新的
-    const newParams = keys.map(key => {
-      const existing = requestForm.pathParams.find(p => p.key === key)
-      return existing || { key, value: '', desc: '' }
-    })
-    requestForm.pathParams = newParams
+  const keys = Array.from(newUrl.matchAll(/\{([\w-]+)\}/g), m => m[1])
+  if (keys.length > 0) {
+    // 深度对比逻辑修复：检查 key 的集合是否真的变化，避免输入时的重复刷新导致焦点丢失
+    const currentKeys = requestForm.pathParams.map(p => p.key);
+    const isSame = keys.length === currentKeys.length && keys.every(k => currentKeys.includes(k));
+
+    if (!isSame) {
+      const newParams = keys.map(key => {
+        const existing = requestForm.pathParams.find(p => p.key === key)
+        // 必须保留原有对象引用或深度克隆值，防止描述丢失
+        return existing ? { key: existing.key, value: existing.value, desc: existing.desc } : { key, value: '', desc: '' }
+      })
+      requestForm.pathParams = newParams
+    }
   } else {
     requestForm.pathParams = []
   }
@@ -576,15 +601,23 @@ const handleNodeClick = async (data) => {
       const res = await getApi(data.itemId)
       const apiData = res.data
       requestForm.itemName = apiData.itemName
+      requestForm.protocol = apiData.protocol || 'http'
       requestForm.url = apiData.reqUrl
-      requestForm.method = apiData.reqMethod
+      requestForm.method = requestForm.protocol === 'webservice' ? 'POST' : apiData.reqMethod
       requestForm.params = parseJson(apiData.reqParams)
       requestForm.headers = parseJson(apiData.reqHeaders)
       requestForm.pathParams = parseJson(apiData.reqPathParams)
       requestForm.formData = parseJson(apiData.reqFormData)
       responseDefList.value = parseJson(apiData.responseDef)
       if (apiData.reqBodyType) requestForm.bodyType = apiData.reqBodyType
-      if (apiData.reqBodyJson) requestForm.bodyJson = apiData.reqBodyJson
+
+      // 如果是 WebService 且 Body 为空，给一个默认 Envelope
+      if (requestForm.protocol === 'webservice' && (!apiData.reqBodyJson || apiData.reqBodyJson === '{\n  \n}')) {
+        requestForm.bodyJson = `<?xml version="1.0" encoding="utf-8"?>\n<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">\n  <soap:Body>\n    \n  </soap:Body>\n</soap:Envelope>`
+      } else {
+        requestForm.bodyJson = apiData.reqBodyJson
+      }
+
       requestForm.isLocked = !!apiData.isLocked
       getHistory()
     } catch (error) {
@@ -607,6 +640,9 @@ const handleNodeClick = async (data) => {
 const handleWrapperClick = (e) => {
   // 如果点击的是树节点内容区域（包括展开箭头、标签等），则不处理，交给 el-tree 自身逻辑
   if (e.target.closest('.el-tree-node__content')) return
+
+  // 优化：如果当前未选中，则不重复重置
+  if (!currentNodeId.value) return
 
   // 否则视为点击了空白处，清除选中状态
   treeRef.value.setCurrentKey(null)
@@ -631,31 +667,31 @@ const getHistory = async () => {
 
 // 还原历史快照
 const handleRestoreHistory = (row) => {
-  if (!row.snapshotJson || row.snapshotJson === 'undefined') {
-    proxy.$modal.msgError('该历史记录不包含快照数据')
-    return
-  }
-  try {
-    const snapshot = JSON.parse(row.snapshotJson)
-    if (!snapshot || typeof snapshot !== 'object') return
+  proxy.$modal.confirm('还原快照将覆盖当前编辑器的所有参数，是否确认？').then(() => {
+    if (!row.snapshotJson || row.snapshotJson === 'undefined') {
+      proxy.$modal.msgError('该历史记录不包含快照数据')
+      return
+    }
+    try {
+      const snapshot = JSON.parse(row.snapshotJson)
+      if (!snapshot || typeof snapshot !== 'object') return
 
-    // 1. 先还原非触发式的数组数据，确保数据完整性 (使用空数组兜底)
-    requestForm.method = snapshot.method || 'GET'
-    requestForm.params = Array.isArray(snapshot.params) ? snapshot.params : []
-    requestForm.headers = Array.isArray(snapshot.headers) ? snapshot.headers : []
-    requestForm.pathParams = Array.isArray(snapshot.pathParams) ? snapshot.pathParams : []
-    requestForm.bodyType = snapshot.bodyType || 'none'
-    requestForm.bodyJson = snapshot.bodyJson || ''
-    requestForm.formData = Array.isArray(snapshot.formData) ? snapshot.formData : []
+      requestForm.protocol = snapshot.protocol || 'http'
+      requestForm.method = snapshot.method || 'GET'
+      requestForm.params = Array.isArray(snapshot.params) ? snapshot.params : []
+      requestForm.headers = Array.isArray(snapshot.headers) ? snapshot.headers : []
+      requestForm.pathParams = Array.isArray(snapshot.pathParams) ? snapshot.pathParams : []
+      requestForm.bodyType = snapshot.bodyType || 'none'
+      requestForm.bodyJson = snapshot.bodyJson || ''
+      requestForm.formData = Array.isArray(snapshot.formData) ? snapshot.formData : []
+      requestForm.url = snapshot.url || ''
 
-    // 2. 最后还原 URL，这会触发 url 的 watch，逻辑会自动从已还原的 pathParams 中匹配值
-    requestForm.url = snapshot.url || ''
-
-    activeReqTab.value = requestForm.bodyType !== 'none' ? 'body' : 'params'
-    proxy.$modal.msgSuccess('已从历史记录还原参数')
-  } catch (e) {
-    proxy.$modal.msgError('快照数据解析失败')
-  }
+      activeReqTab.value = requestForm.bodyType !== 'none' ? 'body' : 'params'
+      proxy.$modal.msgSuccess('已从历史记录还原参数')
+    } catch (e) {
+      proxy.$modal.msgError('快照数据解析失败')
+    }
+  })
 }
 
 // 表格行操作
@@ -697,23 +733,71 @@ const queryHeaderSearch = (queryString, cb) => {
 }
 
 const queryHeaderValueSearch = (row, queryString, cb) => {
-  const key = row.key ? row.key.toLowerCase() : ''
+  const key = row && row.key ? row.key.toLowerCase() : ''
   const suggestions = commonHeaderValues[key] || []
   const results = queryString ? suggestions.filter(s => s.value.toLowerCase().includes(queryString.toLowerCase())) : suggestions
   cb(results)
 }
 
-const formatJson = () => {
+// 简单的 XML 格式化函数
+function formatXml(xml) {
+  let formatted = '';
+  let reg = /(>)(<)(\/*)/g;
+  xml = xml.replace(reg, '$1\r\n$2$3');
+  let pad = 0;
+  xml.split('\r\n').forEach(function (node) {
+    let indent = 0;
+    if (node.match(/.+<\/\w[^>]*>$/)) {
+      indent = 0;
+    } else if (node.match(/^<\/\w/)) {
+      if (pad !== 0) pad -= 1;
+    } else if (node.match(/^<\w[^>]*[^\/]>.*$/)) {
+      indent = 1;
+    } else {
+      indent = 0;
+    }
+    let padding = '';
+    for (let i = 0; i < pad; i++) padding += '  ';
+    formatted += padding + node + '\r\n';
+    pad += indent;
+  });
+  return formatted.trim();
+}
+
+const handleFormat = () => {
   if (!requestForm.bodyJson || !requestForm.bodyJson.trim()) {
     proxy.$modal.msgInfo('当前内容为空，无需格式化')
     return
   }
   try {
-    const obj = JSON.parse(requestForm.bodyJson)
-    requestForm.bodyJson = JSON.stringify(obj, null, 2)
-    proxy.$modal.msgSuccess('格式化成功')
+    if (requestForm.protocol === 'webservice' || requestForm.bodyJson.trim().startsWith('<')) {
+      requestForm.bodyJson = formatXml(requestForm.bodyJson)
+      proxy.$modal.msgSuccess('XML 格式化成功')
+    } else {
+      const obj = JSON.parse(requestForm.bodyJson)
+      requestForm.bodyJson = JSON.stringify(obj, null, 2)
+      proxy.$modal.msgSuccess('格式化成功')
+    }
   } catch (e) {
-    proxy.$modal.msgWarning('JSON 格式有误，请检查语法 (例如引号、逗号等)')
+    proxy.$modal.msgWarning('格式化失败，请检查语法')
+  }
+}
+
+/** 手动格式化响应内容 - 用户自主选择 */
+const handleFormatResponse = () => {
+  if (!responseInfo.value || !responseInfo.value.data) return
+  const rawData = responseInfo.value.data.trim()
+  try {
+    if (rawData.startsWith('<')) {
+      responseInfo.value.data = formatXml(rawData)
+      proxy.$modal.msgSuccess('XML 响应美化成功')
+    } else {
+      const obj = JSON.parse(rawData)
+      responseInfo.value.data = JSON.stringify(obj, null, 2)
+      proxy.$modal.msgSuccess('JSON 响应美化成功')
+    }
+  } catch (e) {
+    proxy.$modal.msgWarning('当前响应内容不是标准的 JSON 或 XML，无法格式化')
   }
 }
 
@@ -744,12 +828,14 @@ const handleSend = async () => {
     const proxyPayload = {
       itemId: currentNodeId.value,
       method: requestForm.method,
+      protocol: requestForm.protocol,
       url: finalUrl,
       headers: headersObj,
       params: {},
       body: '',
       bodyType: requestForm.bodyType,
       snapshotJson: JSON.stringify({
+        protocol: requestForm.protocol,
         method: requestForm.method,
         url: requestForm.url,
         params: requestForm.params,
@@ -782,14 +868,12 @@ const handleSend = async () => {
     const endTime = performance.now()
     const duration = Math.round(endTime - startTime)
     let displayData = actualResponse.data
-    if (typeof displayData === 'string') {
-      try {
-        displayData = JSON.stringify(JSON.parse(displayData), null, 2)
-      } catch (e) { /* 不是JSON，保持原样 */ }
-    } else if (typeof displayData === 'object') {
-      displayData = JSON.stringify(displayData, null, 2)
+
+    // 如果后端因为 RestTemplate 转换原因返回了 Object，则转为紧凑 JSON 字符串，否则保持原样（String）
+    if (displayData !== null && typeof displayData === 'object') {
+      displayData = JSON.stringify(displayData);
     }
-    sendLoading.value = false
+
     responseInfo.value = {
       status: actualResponse.status,
       statusText: actualResponse.statusText || 'Error',
@@ -804,7 +888,7 @@ const handleSend = async () => {
     }
     getHistory()
   } catch (error) {
-    sendLoading.value = false
+    console.error('Send Request Error:', error)
   } finally {
     sendLoading.value = false
   }
@@ -814,6 +898,7 @@ const buildApiData = (id) => {
   return {
     itemId: id,
     itemName: requestForm.itemName || '未命名接口',
+    protocol: requestForm.protocol,
     reqUrl: requestForm.url,
     reqMethod: requestForm.method,
     reqParams: JSON.stringify(requestForm.params),
@@ -827,7 +912,7 @@ const buildApiData = (id) => {
   }
 }
 
-const handleSave = () => {
+const handleSave = async () => {
   if (requestForm.isLocked) {
     proxy.$modal.msgWarning('当前接口已被锁定，无法修改')
     return
@@ -845,6 +930,20 @@ const handleSave = () => {
     return
   }
   const saveData = buildApiData(currentNodeId.value)
+
+  // 深度测试修复：保存时同样增加协议头确认逻辑，防止规避
+  if (saveData.reqUrl && !saveData.reqUrl.toLowerCase().startsWith('http')) {
+    try {
+      await proxy.$modal.confirm('当前接口地址未以 http:// 或 https:// 开头，可能导致代理请求失败，是否确认保存？', '确认提示', {
+        confirmButtonText: '确定保存',
+        cancelButtonText: '返回修改',
+        type: 'warning'
+      })
+    } catch (e) {
+      return
+    }
+  }
+
   updateApi(saveData).then(() => {
     proxy.$modal.msgSuccess('接口信息已保存')
     getTreeData()
@@ -863,30 +962,81 @@ const handleExportDoc = (nodeData = null) => {
       md += `${prefix} ${node.itemName}\n\n`
 
       if (node.itemType === 'api') {
-        md += `**URL**: \`${node.reqMethod} ${node.reqUrl}\`\n\n`
+        md += `**基本信息**\n\n`
+        md += `- **协议类型**: \`${(node.protocol || 'http').toUpperCase()}\`\n`
+        md += `- **请求方式**: \`${node.reqMethod || 'GET'}\`\n`
+        md += `- **接口地址**: \`${node.reqUrl || '-'}\`\n\n`
+
+        // 1. Path Variables
+        const pathParams = parseJson(node.reqPathParams)
+        if (pathParams && pathParams.length > 0) {
+          md += `**路径参数 (Path Variables)**\n\n| 参数名 | 示例值 | 描述 |\n| --- | --- | --- |\n`
+          pathParams.forEach(p => {
+            md += `| ${p.key || '-'} | ${p.value || '-'} | ${p.desc || '-'} |\n`
+          })
+          md += `\n`
+        }
+
+        // 2. Query Params
         const params = parseJson(node.reqParams)
         if (params && params.length > 0 && params.some(p => p.active)) {
-          md += `**Query Params**:\n\n`
-          md += `| Key | Value | Description |\n| --- | --- | --- |\n`
+          md += `**Query 参数**\n\n| 参数名 | 示例值 | 描述 |\n| --- | --- | --- |\n`
           params.filter(p => p.active).forEach(p => {
             md += `| ${p.key} | ${p.value} | ${p.desc || '-'} |\n`
           })
           md += `\n`
         }
-        if (node.reqBodyType === 'json' && node.reqBodyJson) {
-          md += `**Body (JSON)**:\n\`\`\`json\n${node.reqBodyJson}\n\`\`\`\n\n`
+
+        // 3. Headers
+        const headers = parseJson(node.reqHeaders)
+        if (headers && headers.length > 0 && headers.some(h => h.active)) {
+          md += `**请求头 (Headers)**\n\n| 参数名 | 示例值 | 描述 |\n| --- | --- | --- |\n`
+          headers.filter(h => h.active).forEach(h => {
+            md += `| ${h.key} | ${h.value} | ${h.desc || '-'} |\n`
+          })
+          md += `\n`
+        }
+
+        // 4. Request Body
+        if (node.reqBodyType === 'json' || node.protocol === 'webservice') {
+          const lang = node.protocol === 'webservice' ? 'xml' : 'json'
+          if (node.reqBodyJson && node.reqBodyJson.trim() !== '') {
+            md += `**请求体 (${lang.toUpperCase()})**\n\n\`\`\`${lang}\n${node.reqBodyJson}\n\`\`\`\n\n`
+          }
+        } else if (node.reqBodyType === 'form') {
+          const formData = parseJson(node.reqFormData)
+          if (formData && formData.length > 0 && formData.some(f => f.active)) {
+            md += `**请求体 (Form-Data)**\n\n| 参数名 | 示例值 | 描述 |\n| --- | --- | --- |\n`
+            formData.filter(f => f.active).forEach(f => {
+              md += `| ${f.key} | ${f.value} | ${f.desc || '-'} |\n`
+            })
+            md += `\n`
+          }
+        }
+
+        // 5. Response Definition
+        const resDef = parseJson(node.responseDef)
+        if (resDef && resDef.length > 0) {
+          md += `**响应定义 (Response Structure)**\n\n| 字段名 | 类型 | 说明 |\n| --- | --- | --- |\n`
+          resDef.forEach(r => {
+            md += `| ${r.key} | ${r.type} | ${r.desc || '-'} |\n`
+          })
+          md += `\n`
         }
       }
+
+      // 递归处理子节点 (如果是分组)
       if (node.children && node.children.length > 0) {
         md += generateMd(node.children, level + 1)
       }
-      md += `---\n\n`
+      md += `\n---\n\n`
     }
     return md
   }
+
   const findNode = (nodes, id) => {
     for (const node of nodes) {
-      if (node.itemId === id) return node
+      if (String(node.itemId) === String(id)) return node
       if (node.children) {
         const found = findNode(node.children, id)
         if (found) return found
@@ -927,7 +1077,12 @@ const handleImportResponse = () => {
   }
   try {
     const json = parseJson(responseInfo.value.data)
-    responseDefList.value = flattenJson(json)
+    const flattened = flattenJson(json)
+    if (flattened.length === 0) {
+      proxy.$modal.msgWarning('响应内容不是标准 JSON 或为空，无法提取结构')
+      return
+    }
+    responseDefList.value = flattened
     activeReqTab.value = 'responseDef'
     proxy.$modal.msgSuccess('响应结构导入成功')
   } catch (e) {
@@ -935,9 +1090,10 @@ const handleImportResponse = () => {
   }
 }
 
-const flattenJson = (obj, prefix = '') => {
+const flattenJson = (obj, prefix = '', depth = 0) => {
   let result = []
-  if (typeof obj !== 'object' || obj === null) return result
+  // 深度限制，防止恶意 JSON 导致递归死循环
+  if (typeof obj !== 'object' || obj === null || depth > 10) return result
 
   for (const key in obj) {
     const value = obj[key]
@@ -954,9 +1110,9 @@ const flattenJson = (obj, prefix = '') => {
     })
 
     if (type === 'object' && value !== null) {
-      result = result.concat(flattenJson(value, fullKey))
+      result = result.concat(flattenJson(value, fullKey, depth + 1))
     } else if (type === 'Array' && value.length > 0 && typeof value[0] === 'object') {
-      result = result.concat(flattenJson(value[0], fullKey + '[0]'))
+      result = result.concat(flattenJson(value[0], fullKey + '[0]', depth + 1))
     }
   }
   return result
@@ -981,6 +1137,10 @@ const execDeleteNode = (node) => {
         currentNodeId.value = null
         currentNodeType.value = null
         Object.assign(requestForm, getDefaultRequestForm())
+        responseInfo.value = null // 优化：清理响应信息
+        responseDefList.value = [] // 优化：清理响应定义
+        activeReqTab.value = 'params' // 状态彻底回滚
+        activeResTab.value = 'response'
       }
     })
   }).catch(() => { })
@@ -1048,6 +1208,7 @@ const handleContextMenu = (action) => {
 function reset() {
   createForm.value = {
     itemType: 'group',
+    protocol: 'http',
     itemName: '',
     reqMethod: 'GET',
     reqUrl: ''
@@ -1077,12 +1238,27 @@ const submitCreate = async () => {
   const postData = {
     itemName: createForm.value.itemName,
     itemType: createForm.value.itemType,
+    protocol: createForm.value.protocol,
     parentId: createParentNode.value ? createParentNode.value.data.itemId : 0
   }
 
   if (createForm.value.itemType === 'api') {
-    postData.reqMethod = createForm.value.reqMethod
+    // WebService 协议下强制记录为 POST
+    postData.reqMethod = createForm.value.protocol === 'webservice' ? 'POST' : createForm.value.reqMethod
     postData.reqUrl = createForm.value.reqUrl
+
+    // 修正：如果 reqUrl 不包含协议头，弹出确认框要求用户确认
+    if (postData.reqUrl && !postData.reqUrl.toLowerCase().startsWith('http')) {
+      try {
+        await proxy.$modal.confirm('当前接口地址未以 http:// 或 https:// 开头，可能导致代理请求失败，是否确认创建？', '确认提示', {
+          confirmButtonText: '确定创建',
+          cancelButtonText: '返回修改',
+          type: 'warning'
+        })
+      } catch (e) {
+        return // 用户选择取消，终止创建流程
+      }
+    }
   }
 
   try {
@@ -1107,8 +1283,12 @@ const submitCreate = async () => {
 // 拖拽规则控制
 const allowDrop = (draggingNode, dropNode, type) => {
   // type: 'prev' (前), 'inner' (内), 'next' (后)
-  // 只有“分组”节点允许被插入内部 ('inner')
   if (type === 'inner') {
+    // 1. 只有“分组”节点允许被插入内部
+    // 2. 深度测试优化：如果目标分组已锁定，禁止在 UI 上执行拖入操作
+    if (dropNode.data.isLocked) {
+      return false
+    }
     return dropNode.data.itemType === 'group'
   }
   return true
@@ -1122,6 +1302,7 @@ const handleNodeDrop = (draggingNode, dropNode, dropType) => {
   }
   updateApi({ itemId: draggingNode.data.itemId, parentId: newParentId }).then(() => {
     proxy.$modal.msgSuccess('移动成功')
+    getTreeData() // 刷新树结构，确保父子关系即时更新
   }).catch(() => {
     getTreeData()
   })
@@ -1172,7 +1353,8 @@ onMounted(() => {
   width: 100vw;
   height: 100vh;
   z-index: 2000;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.02);
+  /* 建议2：增加极轻微遮罩，提升交互感 */
 }
 
 /* Splitpanes 样式适配 */
@@ -1257,6 +1439,7 @@ onMounted(() => {
     text-align: center;
     font-weight: bold;
     justify-content: center;
+    flex-shrink: 0;
   }
 
   .folder-icon {
@@ -1268,6 +1451,7 @@ onMounted(() => {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 1;
   }
 
   .lock-icon {
@@ -1373,12 +1557,19 @@ onMounted(() => {
     display: flex;
     align-items: center;
     gap: 10px;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+
+    .status-tag {
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
 
     .meta-item {
       color: var(--el-text-color-secondary);
+      flex-shrink: 0;
     }
   }
 

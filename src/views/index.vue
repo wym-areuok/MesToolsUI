@@ -95,8 +95,8 @@
             </div>
           </template>
           <div class="about-section">
-            <p>MES Tools UI 是基于 Vue3 + Element Plus 构建的工具集合。<br>
-              如果在使用过程中遇到问题，请联系管理员。</p>
+            <p>MES Tools UI是基于 Vue3 + Element Plus 构建的工具集合。<br>
+              如果在使用过程中遇到问题，请联系管理员IES255009。</p>
             <div class="tech-tags">
               <el-tag class="mr-5">Vue 3</el-tag>
               <el-tag class="mr-5" type="success">Vite</el-tag>
@@ -125,6 +125,8 @@ const systemStatus = ref(true)
 
 // 更新日志数据
 const updateLogs = [
+  { timestamp: '2026-05-13', title: '部署于192.168.2.48测试环境', content: '部署于192.168.2.48测试环境', type: 'primary' },
+  { timestamp: '2026-05-10', title: '重构和优化', content: '重构接口模块', color: '#E6A23C' },
   { timestamp: '2025-12-20', title: 'MES工具箱测试完成', content: '集成SQL执行、跳站、密码修改等功能。', type: 'primary' },
   { timestamp: '2025-12-10', title: '功能初步完成进行测试', content: '功能初步完成进行测试。', color: '#E6A23C' },
   { timestamp: '2025-11-20', title: '项目开始', content: '没有内容。', type: 'primary' },
@@ -214,18 +216,55 @@ onMounted(() => {
     }
   }).catch(e => console.log('获取资料统计失败', e))
 
-  // 获取用户信息(IP)及检测系统状态
-  getInfo().then(res => {
-    if (res.user && res.user.loginIp) {
-      clientIp.value = res.user.loginIp
-    } else {
-      clientIp.value = '未知'
+  // 获取用户信息 (IP) 及检测系统状态
+  const getIpWithFallback = async () => {
+    const ipSources = [
+      'https://api.ipify.org?format=json',
+      'https://api64.ipify.org?format=json'
+    ];
+
+    let fetchedIp = null;
+
+    // 1. 尝试从浏览器端获取实时公网 IP (循环尝试多个源)
+    for (const source of ipSources) {
+      try {
+        const response = await Promise.race([
+          fetch(source),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
+        ]);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.ip) {
+            fetchedIp = data.ip;
+            break; // 只要有一个源成功就停止尝试
+          }
+        }
+      } catch (e) {
+        continue; // 失败则尝试下一个源
+      }
     }
-    systemStatus.value = true
-  }).catch(() => {
-    clientIp.value = '获取失败'
-    systemStatus.value = false
-  })
+
+    if (fetchedIp) {
+      clientIp.value = fetchedIp;
+    }
+
+    // 2. 调用后端接口仅用于检测系统存活状态
+    getInfo().then(() => {
+      systemStatus.value = true;
+      if (!fetchedIp) {
+        clientIp.value = '内网环境'; // 无法访问公网 API 但能连接后端，判定为内网
+      }
+    }).catch(err => {
+      systemStatus.value = false;
+      // 只有在浏览器获取失败且后端服务也无法连接时，才更新显示内容
+      if (!fetchedIp) {
+        clientIp.value = '服务连接异常';
+      }
+      console.error("系统探测失败:", err);
+    });
+  };
+
+  getIpWithFallback();
 
   // 绑定快捷键
   window.addEventListener('keydown', handleKeydown)
