@@ -310,6 +310,10 @@
                   </el-tab-pane>
                   <el-tab-pane label="请求历史" name="history">
                     <div class="panel-content" v-loading="historyLoading">
+                      <div v-if="historyList.length > 0"
+                        style="margin-bottom: 10px; display: flex; justify-content: flex-end;">
+                        <el-button link type="danger" icon="Delete" @click="handleClearHistory">清空历史</el-button>
+                      </div>
                       <el-table :data="historyList" size="small" border style="width: 100%">
                         <el-table-column label="状态" width="70">
                           <template #default="scope">
@@ -324,10 +328,12 @@
                           <template #default="scope">{{ scope.row.duration }}ms</template>
                         </el-table-column>
                         <el-table-column label="请求时间" prop="createTime" min-width="140" />
-                        <el-table-column label="操作" width="70" align="center">
+                        <el-table-column label="操作" width="100" align="center">
                           <template #default="scope">
                             <el-button link type="primary" @click="handleRestoreHistory(scope.row)"
                               title="还原快照参数">还原</el-button>
+                            <el-button link type="danger" @click="handleDeleteHistory(scope.row)"
+                              title="删除此记录">删除</el-button>
                           </template>
                         </el-table-column>
                       </el-table>
@@ -411,6 +417,7 @@ import {
   addApi, updateApi, delApi,
   proxyRequest,
   toggleLock,
+  delHistory, clearHistory,
   listHistory
 } from '@/api/dailyTools/apiManage'
 
@@ -577,13 +584,18 @@ const parseJson = (str) => {
 // Body 类型切换时自动处理 Header
 const handleBodyTypeChange = (type) => {
   if (type === 'json') {
-    const hasContentType = requestForm.headers.some(h => h.key.toLowerCase() === 'content-type')
-    if (!hasContentType) {
-      requestForm.headers.unshift({ active: true, key: 'Content-Type', value: 'application/json', desc: 'Auto-added' })
-    } else {
-      const ct = requestForm.headers.find(h => h.key.toLowerCase() === 'content-type')
-      if (ct) ct.value = 'application/json'
-    }
+    updateOrAddHeader('Content-Type', 'application/json')
+  } else if (type === 'form') {
+    updateOrAddHeader('Content-Type', 'multipart/form-data')
+  }
+}
+
+const updateOrAddHeader = (key, value) => {
+  const index = requestForm.headers.findIndex(h => h.key.toLowerCase() === key.toLowerCase())
+  if (index > -1) {
+    requestForm.headers[index].value = value
+  } else {
+    requestForm.headers.unshift({ active: true, key, value, desc: 'Auto-added' })
   }
 }
 
@@ -691,6 +703,26 @@ const handleRestoreHistory = (row) => {
     } catch (e) {
       proxy.$modal.msgError('快照数据解析失败')
     }
+  })
+}
+
+// 删除单条历史
+const handleDeleteHistory = (row) => {
+  proxy.$modal.confirm('确认要删除这条历史记录吗？').then(() => {
+    delHistory(row.historyId).then(() => {
+      proxy.$modal.msgSuccess('删除成功')
+      getHistory()
+    })
+  })
+}
+
+// 清空该接口所有历史
+const handleClearHistory = () => {
+  proxy.$modal.confirm('确认要清空该接口的所有历史记录吗？').then(() => {
+    clearHistory(currentNodeId.value).then(() => {
+      proxy.$modal.msgSuccess('清空成功')
+      getHistory()
+    })
   })
 }
 
@@ -1293,6 +1325,7 @@ const allowDrop = (draggingNode, dropNode, type) => {
   }
   return true
 }
+
 const handleNodeDrop = (draggingNode, dropNode, dropType) => {
   let newParentId = 0
   if (dropType === 'inner') {
@@ -1300,7 +1333,13 @@ const handleNodeDrop = (draggingNode, dropNode, dropType) => {
   } else {
     newParentId = dropNode.data.parentId
   }
-  updateApi({ itemId: draggingNode.data.itemId, parentId: newParentId }).then(() => {
+
+  // 排序优化：获取当前目录下所有兄弟节点，并计算新的 sortOrder
+  const parentNode = treeRef.value.getNode(newParentId);
+  const siblings = parentNode ? parentNode.childNodes : treeRef.value.root.childNodes;
+  const sortOrder = siblings.findIndex(node => node.data.itemId === draggingNode.data.itemId) + 1;
+
+  updateApi({ itemId: draggingNode.data.itemId, parentId: newParentId, sortOrder: sortOrder }).then(() => {
     proxy.$modal.msgSuccess('移动成功')
     getTreeData() // 刷新树结构，确保父子关系即时更新
   }).catch(() => {

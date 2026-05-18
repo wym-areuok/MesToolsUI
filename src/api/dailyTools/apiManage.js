@@ -60,6 +60,22 @@ export function listHistory(query) {
   })
 }
 
+// 删除单条历史记录
+export function delHistory(historyId) {
+  return request({
+    url: '/dailytools/apiManage/history/' + historyId,
+    method: 'delete'
+  })
+}
+
+// 清空某个接口的全部历史记录
+export function clearHistory(itemId) {
+  return request({
+    url: '/dailytools/apiManage/history/clear/' + itemId,
+    method: 'delete'
+  })
+}
+
 // 新增历史记录 (通常由后端在代理请求成功后自动记录，但也提供手动接口)
 export function addHistory(data) {
   return request({
